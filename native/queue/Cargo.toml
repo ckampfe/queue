@@ -1,0 +1,15 @@
+[package]
+name = "queue"
+version = "0.1.0"
+authors = []
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rustler = "0.38"
+
+[profile.release]
+codegen-units = 1
+lto = true
