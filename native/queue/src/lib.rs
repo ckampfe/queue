@@ -2,6 +2,7 @@ use rustler::env::SavedTerm;
 use rustler::{Env, NifStruct, OwnedEnv, Resource, ResourceArc, Term};
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::ops::Range;
 use std::sync::Mutex;
 
 const SLAB_SIZE: usize = 2usize.pow(12);
@@ -34,6 +35,39 @@ impl QueueImpl {
         }
     }
 
+    /// write terms to slabs in bulk,
+    /// first preallocating the memory for any slabs needed
+    /// to fully accomodate the terms
+    fn extend(&mut self, terms: &[Term]) {
+        self.reserve_slabs(terms.len());
+
+        let mut position_in_terms_start: usize = 0;
+        let mut position_in_terms_end: usize;
+
+        for range_in_slab in SlabRangerator::new(self.end_slab_position, terms.len()) {
+            let slab = if let Some(slab) = self.slabs.back_mut() {
+                slab
+            } else {
+                self.slabs.push_back_mut(Slab::new())
+            };
+
+            let length_to_write = range_in_slab.end - range_in_slab.start;
+            position_in_terms_end = position_in_terms_start + length_to_write;
+            slab.write(&terms[position_in_terms_start..position_in_terms_end]);
+
+            position_in_terms_start = position_in_terms_end;
+
+            if range_in_slab.end >= SLAB_SIZE {
+                self.slabs.push_back(Slab::new());
+                self.end_slab_position = 0;
+            } else {
+                self.end_slab_position += length_to_write;
+            }
+        }
+    }
+
+    /// reserve the minimum number of slabs
+    /// needed to fully store up to `n` terms
     fn reserve_slabs(&mut self, n: usize) {
         let last_slab_remaining_capacity = SLAB_SIZE - self.end_slab_position;
 
@@ -173,35 +207,70 @@ impl Slab {
         }
     }
 
-    // fn is_full(&self) -> bool {
-    //     self.len == SLAB_SIZE
-    // }
+    /// write the given `terms` to the slab at `self.len`
+    fn write(&mut self, terms: &[Term]) {
+        let saved_terms = terms.iter().map(|term| self.env.save(term));
+
+        for (target, saved_term) in self.data[self.len..self.len + terms.len()]
+            .iter_mut()
+            .zip(saved_terms)
+        {
+            *target = Some(saved_term)
+        }
+
+        self.len += terms.len()
+    }
 
     fn push(&mut self, term: &Term) {
         let owned_term = self.env.save(term);
         self.data[self.len] = Some(owned_term);
         self.len += 1;
     }
+}
 
-    // way to take an entire slab and slam it into another collection
-    // fn take_all<'env>(&self, caller_env: Env<'env>, out: &mut Vec<Term<'env>>) {
-    //     self.env.run(|owned_env| {
-    //         let iter = self.data.iter().map(|item| {
-    //             let item = item.as_ref().unwrap();
-    //             item.load(owned_env).in_env(caller_env)
-    //         });
+/// an iterator to emit ranges for where in slabs to write an input of
+/// `remaining_input` into slabs of SLAB_SIZE,
+/// starting at `position`.
+///
+/// see the tests for what this looks like
+struct SlabRangerator {
+    position: usize,
+    remaining_input: usize,
+}
 
-    //         out.extend(iter)
-    //     });
-    // }
+impl SlabRangerator {
+    fn new(position: usize, remaining_input: usize) -> Self {
+        Self {
+            position,
+            remaining_input,
+        }
+    }
+}
 
-    // fn take_all2<'env>(self, caller_env: Env<'env>, out: &mut Vec<Term<'env>>) {
-    //     self.env.run(|owned_env| {
-    //         let x = self.data.into_iter().map(|item| item.unwrap());
-    //         let i = x.map(|item| item.load(owned_env).in_env(caller_env));
-    //         out.extend(i);
-    //     });
-    // }
+impl Iterator for SlabRangerator {
+    type Item = Range<usize>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining_input > 0 {
+            let available = SLAB_SIZE - self.position;
+
+            let range_start = self.position;
+
+            let range_end = range_start + min(available, self.remaining_input);
+
+            if range_end == SLAB_SIZE {
+                self.position = 0;
+            } else {
+                self.position = range_end;
+            }
+
+            self.remaining_input -= range_end - range_start;
+
+            Some(range_start..range_end)
+        } else {
+            None
+        }
+    }
 }
 
 #[rustler::resource_impl]
@@ -230,12 +299,7 @@ fn push_back(queue: Queue, term: Term) -> Queue {
 fn push_back_n_impl(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
     {
         let mut guard = queue.resource.inner.lock().unwrap();
-
-        guard.reserve_slabs(list_of_terms.len());
-
-        for term in &list_of_terms {
-            guard.push_back(term);
-        }
+        guard.extend(&list_of_terms);
     }
 
     queue
@@ -266,3 +330,20 @@ fn count(queue: Queue) -> usize {
 }
 
 rustler::init!("Elixir.Queue");
+
+#[cfg(test)]
+mod tests {
+    use crate::SlabRangerator;
+
+    #[test]
+    fn rangerator_test() {
+        let ranges: Vec<_> = SlabRangerator::new(0, 4000).into_iter().collect();
+        assert_eq!(ranges, vec![0..4000]);
+
+        let ranges: Vec<_> = SlabRangerator::new(4000, 1000).into_iter().collect();
+        assert_eq!(ranges, vec![4000..4096, 0..904]);
+
+        let ranges: Vec<_> = SlabRangerator::new(4000, 5000).into_iter().collect();
+        assert_eq!(ranges, vec![4000..4096, 0..4096, 0..808]);
+    }
+}
