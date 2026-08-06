@@ -309,7 +309,7 @@ fn extend(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
     queue
 }
 
-#[rustler::nif(schedule = "DirtyCpu")]
+#[rustler::nif]
 fn pop_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take(env, 1).pop()
