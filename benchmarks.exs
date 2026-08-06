@@ -71,7 +71,7 @@ end
 Benchee.run(
   %{
     ":queue.out/1" => fn {_q, erl_q, n} ->
-      Enum.reduce(1..n, erl_q, fn _, acc ->
+      Enum.reduce(1..n, erl_q, fn _, _acc ->
         ErlangQueueServer.out(erl_q_server)
       end)
     end,
