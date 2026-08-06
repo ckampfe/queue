@@ -295,8 +295,8 @@ fn push_back(queue: Queue, term: Term) -> Queue {
     queue
 }
 
-#[rustler::nif(schedule = "DirtyCpu")]
-fn push_back_n_impl(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
+#[rustler::nif(name = "extend_impl", schedule = "DirtyCpu")]
+fn extend(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
     {
         let mut guard = queue.resource.inner.lock().unwrap();
         guard.extend(&list_of_terms);
@@ -311,8 +311,8 @@ fn pop_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
     guard.take(env, 1).pop()
 }
 
-#[rustler::nif(schedule = "DirtyCpu")]
-fn pop_front_n_impl<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+#[rustler::nif(name = "take_impl", schedule = "DirtyCpu")]
+fn take<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take(env, n)
 }
