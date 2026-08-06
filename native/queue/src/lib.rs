@@ -187,8 +187,12 @@ impl QueueImpl {
     // every element written across all slabs, minus the ones already consumed
     // out of the front slab.
     fn len(&self) -> usize {
-        let written: usize = self.slabs.iter().map(|slab| slab.len).sum();
-        written.saturating_sub(self.front_slab_position)
+        if self.slabs.is_empty() {
+            0
+        } else {
+            ((self.slabs.len() - 1) * SLAB_SIZE + self.end_slab_position)
+                .saturating_sub(self.front_slab_position)
+        }
     }
 }
 
