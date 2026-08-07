@@ -4,6 +4,8 @@ use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Mutex;
 
+// More or less a raw pointer to a BEAM term.
+// See `Slab` for details of lifetime/safety.
 type NifTerm = usize;
 
 const SLAB_SIZE: usize = 2usize.pow(12);
@@ -53,15 +55,17 @@ impl QueueImpl {
 
             let length_to_write = range_in_slab.end - range_in_slab.start;
             position_in_terms_end = position_in_terms_start + length_to_write;
-            slab.write(&terms[position_in_terms_start..position_in_terms_end]);
+            slab.write(
+                self.end_slab_position,
+                &terms[position_in_terms_start..position_in_terms_end],
+            );
+            self.end_slab_position += length_to_write;
 
             position_in_terms_start = position_in_terms_end;
 
             if range_in_slab.end >= SLAB_SIZE {
                 self.slabs.push_back(Slab::new());
                 self.end_slab_position = 0;
-            } else {
-                self.end_slab_position += length_to_write;
             }
         }
     }
@@ -85,8 +89,7 @@ impl QueueImpl {
             self.slabs.push_back_mut(Slab::new())
         };
 
-        slab.push(term);
-
+        slab.push(self.end_slab_position, term);
         self.end_slab_position += 1;
 
         if self.end_slab_position >= SLAB_SIZE {
@@ -107,18 +110,23 @@ impl QueueImpl {
         let mut remaining = n;
 
         while remaining > 0 {
+            let is_last_slab = self.slabs.len() == 1;
             // Read as much as we can out of the current front slab.
             // `exhausted` means the front slab has no more elements to give,
             // so we should discard it and move on to the next slab.
             let (new_front_position, slab_is_exhausted) = {
                 let slab = match self.slabs.front_mut() {
                     Some(slab) => slab,
-                    // No slabs left at all: nothing more to take.
                     None => break,
                 };
 
                 let start = self.front_slab_position;
-                let available = slab.len.saturating_sub(start);
+
+                let available = if is_last_slab {
+                    self.end_slab_position.saturating_sub(start)
+                } else {
+                    SLAB_SIZE.saturating_sub(start)
+                };
 
                 if available == 0 {
                     (start, true)
@@ -135,7 +143,14 @@ impl QueueImpl {
                     });
 
                     remaining -= take_here;
-                    (end, end >= slab.len)
+                    (
+                        end,
+                        if is_last_slab {
+                            end >= self.end_slab_position
+                        } else {
+                            end >= SLAB_SIZE
+                        },
+                    )
                 }
             };
 
@@ -159,19 +174,33 @@ impl QueueImpl {
 
     // like `take`, but reads every remaining element and leaves the slabs untouched:
     // start at self.front_slab_position in the front slab, then read each
-    // subsequent slab in full.
-    fn as_vec<'env>(&mut self, caller_env: Env<'env>) -> Vec<Term<'env>> {
+    // subsequent slab in full, up to `self.end_slab_position` in the last slab.
+    fn as_vec<'env>(&self, caller_env: Env<'env>) -> Vec<Term<'env>> {
         let mut terms = Vec::with_capacity(self.len());
 
-        for (i, slab) in self.slabs.iter().enumerate() {
-            let start = if i == 0 { self.front_slab_position } else { 0 };
+        let slabs_len = self.slabs.len();
 
-            if start >= slab.len {
+        for (i, slab) in self.slabs.iter().enumerate() {
+            let is_first_slab = i == 0;
+            let is_last_slab = i == slabs_len - 1;
+            let start = if is_first_slab {
+                self.front_slab_position
+            } else {
+                0
+            };
+
+            if is_last_slab && start >= self.end_slab_position {
                 continue;
             }
 
             slab.env.run(|owned_env| {
-                let term_iter = slab.data[start..slab.len].iter().map(|saved_term| {
+                let to_take = if is_last_slab {
+                    start..self.end_slab_position
+                } else {
+                    start..SLAB_SIZE
+                };
+
+                let term_iter = slab.data[to_take].iter().map(|saved_term| {
                     unsafe { Term::new(owned_env, *saved_term) }.in_env(caller_env)
                 });
 
@@ -197,7 +226,6 @@ impl QueueImpl {
 struct Slab {
     env: OwnedEnv,
     data: [NifTerm; SLAB_SIZE],
-    len: usize,
 }
 
 impl Slab {
@@ -205,7 +233,6 @@ impl Slab {
         Self {
             env: OwnedEnv::new(),
             data: [0; SLAB_SIZE],
-            len: 0,
         }
     }
 
@@ -220,21 +247,18 @@ impl Slab {
     /// and the terms in it are freed.
     ///
     /// therefor the slab owns the terms
-    fn write(&mut self, terms: &[Term]) {
-        let Slab { env, data, len } = self;
+    fn write(&mut self, begin: usize, terms: &[Term]) {
+        let Slab { env, data } = self;
 
         env.run(|env| {
-            for (target, term) in data[*len..*len + terms.len()].iter_mut().zip(terms) {
+            for (target, term) in data[begin..begin + terms.len()].iter_mut().zip(terms) {
                 *target = term.in_env(env).as_c_arg();
             }
         });
-
-        self.len += terms.len()
     }
 
-    fn push(&mut self, term: &Term) {
-        self.data[self.len] = self.env.run(|env| term.in_env(env).as_c_arg());
-        self.len += 1;
+    fn push(&mut self, begin: usize, term: &Term) {
+        self.data[begin] = self.env.run(|env| term.in_env(env).as_c_arg());
     }
 }
 
@@ -335,7 +359,7 @@ fn take_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
 
 #[rustler::nif(schedule = "DirtyCpu")]
 fn to_list<'env>(env: Env<'env>, queue: Queue) -> Vec<Term<'env>> {
-    let mut guard = queue.resource.inner.lock().unwrap();
+    let guard = queue.resource.inner.lock().unwrap();
     guard.as_vec(env)
 }
 
