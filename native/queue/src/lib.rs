@@ -1,9 +1,10 @@
-use rustler::env::SavedTerm;
 use rustler::{Env, NifStruct, OwnedEnv, Resource, ResourceArc, Term};
 use std::cmp::min;
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::sync::Mutex;
+
+type NifTerm = usize;
 
 const SLAB_SIZE: usize = 2usize.pow(12);
 
@@ -25,8 +26,7 @@ struct QueueImpl {
 
 impl QueueImpl {
     fn new() -> Self {
-        let mut slabs = VecDeque::new();
-        slabs.push_back(Slab::new());
+        let slabs = VecDeque::from([Slab::new()]);
 
         Self {
             slabs,
@@ -126,10 +126,9 @@ impl QueueImpl {
                     let take_here = min(available, remaining);
                     let end = start + take_here;
 
-                    slab.env.run(|owned| {
+                    slab.env.run(|owned_env| {
                         let term_iter = slab.data[start..end].iter().map(|saved_term| {
-                            let saved_term = saved_term.as_ref().unwrap();
-                            saved_term.load(owned).in_env(caller_env)
+                            unsafe { Term::new(owned_env, *saved_term) }.in_env(caller_env)
                         });
 
                         terms.extend(term_iter);
@@ -171,10 +170,9 @@ impl QueueImpl {
                 continue;
             }
 
-            slab.env.run(|owned| {
+            slab.env.run(|owned_env| {
                 let term_iter = slab.data[start..slab.len].iter().map(|saved_term| {
-                    let saved_term = saved_term.as_ref().unwrap();
-                    saved_term.load(owned).in_env(caller_env)
+                    unsafe { Term::new(owned_env, *saved_term) }.in_env(caller_env)
                 });
 
                 terms.extend(term_iter);
@@ -198,7 +196,7 @@ impl QueueImpl {
 
 struct Slab {
     env: OwnedEnv,
-    data: [Option<SavedTerm>; SLAB_SIZE],
+    data: [NifTerm; SLAB_SIZE],
     len: usize,
 }
 
@@ -206,28 +204,36 @@ impl Slab {
     fn new() -> Self {
         Self {
             env: OwnedEnv::new(),
-            data: [const { None }; SLAB_SIZE],
+            data: [0; SLAB_SIZE],
             len: 0,
         }
     }
 
     /// write the given `terms` to the slab at `self.len`
+    ///
+    /// SAFETY:
+    ///
+    /// in_env copies the term into env.
+    /// the term's lifetime is bound by env.
+    /// env's lifetime is the slab's lifetime,
+    /// so when the slab is freed, env is freed,
+    /// and the terms in it are freed.
+    ///
+    /// therefor the slab owns the terms
     fn write(&mut self, terms: &[Term]) {
-        let saved_terms = terms.iter().map(|term| self.env.save(term));
+        let Slab { env, data, len } = self;
 
-        for (target, saved_term) in self.data[self.len..self.len + terms.len()]
-            .iter_mut()
-            .zip(saved_terms)
-        {
-            *target = Some(saved_term)
-        }
+        env.run(|env| {
+            for (target, term) in data[*len..*len + terms.len()].iter_mut().zip(terms) {
+                *target = term.in_env(env).as_c_arg();
+            }
+        });
 
         self.len += terms.len()
     }
 
     fn push(&mut self, term: &Term) {
-        let owned_term = self.env.save(term);
-        self.data[self.len] = Some(owned_term);
+        self.data[self.len] = self.env.run(|env| term.in_env(env).as_c_arg());
         self.len += 1;
     }
 }
@@ -315,8 +321,14 @@ fn pop_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
     guard.take(env, 1).pop()
 }
 
-#[rustler::nif(name = "take_impl", schedule = "DirtyCpu")]
-fn take<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+#[rustler::nif]
+fn take_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+    let mut guard = queue.resource.inner.lock().unwrap();
+    guard.take(env, n)
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn take_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take(env, n)
 }

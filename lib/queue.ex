@@ -41,7 +41,11 @@ defmodule Queue do
   Returns less than `n` items if `len(queue)` < `n`.
   """
   def take(queue, n) when is_integer(n) and n >= 0 do
-    take_impl(queue, n)
+    if n <= 1024 do
+      take_small(queue, n)
+    else
+      take_large(queue, n)
+    end
   end
 
   @doc """
@@ -75,7 +79,8 @@ defmodule Queue do
 
   defp extend_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
 
-  defp take_impl(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+  defp take_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+  defp take_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 # TODO these impls can be sped up to use native functions
