@@ -40,7 +40,7 @@ impl QueueImpl {
     /// write terms to slabs in bulk,
     /// first preallocating the memory for any slabs needed
     /// to fully accomodate the terms
-    fn extend(&mut self, terms: &[Term]) {
+    fn extend_back(&mut self, terms: &[Term]) {
         self.reserve_slabs(terms.len());
 
         let mut position_in_terms_start: usize = 0;
@@ -106,7 +106,7 @@ impl QueueImpl {
     // - we have run out of elements to take
     //
     // if we run out of elements in a slab, discard that slab and proceed to the subsequent slab
-    fn take<'env>(&mut self, caller_env: Env<'env>, n: usize) -> Vec<Term<'env>> {
+    fn take_front<'env>(&mut self, caller_env: Env<'env>, n: usize) -> Vec<Term<'env>> {
         let mut terms = Vec::with_capacity(min(n, self.len()));
         let mut remaining = n;
         let mut is_last_slab = self.slabs.len() == 1;
@@ -346,11 +346,11 @@ fn push_back(queue: Queue, term: Term) -> Queue {
     queue
 }
 
-#[rustler::nif(name = "extend_impl", schedule = "DirtyCpu")]
-fn extend(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
+#[rustler::nif(name = "extend_back_impl", schedule = "DirtyCpu")]
+fn extend_back(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
     {
         let mut guard = queue.resource.inner.lock().unwrap();
-        guard.extend(&list_of_terms);
+        guard.extend_back(&list_of_terms);
     }
 
     queue
@@ -359,19 +359,19 @@ fn extend(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
 #[rustler::nif]
 fn pop_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
-    guard.take(env, 1).pop()
+    guard.take_front(env, 1).pop()
 }
 
 #[rustler::nif]
-fn take_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+fn take_front_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
-    guard.take(env, n)
+    guard.take_front(env, n)
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
-fn take_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+fn take_front_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
-    guard.take(env, n)
+    guard.take_front(env, n)
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]

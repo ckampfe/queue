@@ -21,14 +21,14 @@ defmodule QueueTest do
       terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
       assert terms == Queue.to_list(q)
     end
 
     test "is non-destructive" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
       assert [1, 2, 3] == Queue.to_list(q)
       assert [1, 2, 3] == Queue.to_list(q)
@@ -38,20 +38,20 @@ defmodule QueueTest do
 
     test "reflects elements already popped" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3, 4, 5])
+      Queue.extend_back(q, [1, 2, 3, 4, 5])
 
       assert 1 == Queue.pop_front(q)
       assert [2, 3, 4, 5] == Queue.to_list(q)
 
-      assert [2, 3] == Queue.take(q, 2)
+      assert [2, 3] == Queue.take_front(q, 2)
       assert [4, 5] == Queue.to_list(q)
     end
 
     test "is empty again after the queue is drained" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      assert [1, 2, 3] == Queue.take(q, 3)
+      assert [1, 2, 3] == Queue.take_front(q, 3)
       assert [] == Queue.to_list(q)
     end
 
@@ -71,7 +71,7 @@ defmodule QueueTest do
       expected = Enum.to_list(1..(3 * 4096 + 7))
 
       q = Queue.new()
-      Queue.extend(q, expected)
+      Queue.extend_back(q, expected)
 
       assert expected == Queue.to_list(q)
       assert length(expected) == Queue.count(q)
@@ -81,10 +81,10 @@ defmodule QueueTest do
       expected = Enum.to_list(1..(2 * 4096))
 
       q = Queue.new()
-      Queue.extend(q, expected)
+      Queue.extend_back(q, expected)
 
       popped = 4096 + 100
-      assert Enum.take(expected, popped) == Queue.take(q, popped)
+      assert Enum.take(expected, popped) == Queue.take_front(q, popped)
 
       remaining = Enum.drop(expected, popped)
       assert remaining == Queue.to_list(q)
@@ -93,10 +93,10 @@ defmodule QueueTest do
 
     test "agrees with len/1 as the queue is consumed" do
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..100))
+      Queue.extend_back(q, Enum.to_list(1..100))
 
       Enum.each(1..10, fn _ ->
-        Queue.take(q, 7)
+        Queue.take_front(q, 7)
         assert Queue.count(q) == length(Queue.to_list(q))
       end)
     end
@@ -122,24 +122,24 @@ defmodule QueueTest do
     test "counts bulk pushes" do
       q = Queue.new()
 
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
       assert 3 == Queue.count(q)
 
-      Queue.extend(q, [4, 5])
+      Queue.extend_back(q, [4, 5])
       assert 5 == Queue.count(q)
     end
 
     test "pushing an empty list does not change the length" do
       q = Queue.new()
-      Queue.extend(q, [1, 2])
+      Queue.extend_back(q, [1, 2])
 
-      Queue.extend(q, [])
+      Queue.extend_back(q, [])
       assert 2 == Queue.count(q)
     end
 
     test "is not affected by reading the queue" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
       Queue.to_list(q)
       Queue.to_list(q)
@@ -149,28 +149,28 @@ defmodule QueueTest do
 
     test "decreases as elements are popped" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3, 4, 5])
+      Queue.extend_back(q, [1, 2, 3, 4, 5])
 
       Queue.pop_front(q)
       assert 4 == Queue.count(q)
 
-      Queue.take(q, 2)
+      Queue.take_front(q, 2)
       assert 2 == Queue.count(q)
     end
 
     test "is zero once the queue is drained" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      Queue.take(q, 3)
+      Queue.take_front(q, 3)
       assert 0 == Queue.count(q)
     end
 
     test "does not go negative when over-popping" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      assert [1, 2, 3] == Queue.take(q, 1000)
+      assert [1, 2, 3] == Queue.take_front(q, 1000)
       assert 0 == Queue.count(q)
 
       assert nil == Queue.pop_front(q)
@@ -180,11 +180,11 @@ defmodule QueueTest do
     test "counts elements pushed after the queue was drained" do
       q = Queue.new()
 
-      Queue.extend(q, [1, 2, 3])
-      Queue.take(q, 3)
+      Queue.extend_back(q, [1, 2, 3])
+      Queue.take_front(q, 3)
       assert 0 == Queue.count(q)
 
-      Queue.extend(q, [4, 5])
+      Queue.extend_back(q, [4, 5])
       assert 2 == Queue.count(q)
       assert [4, 5] == Queue.to_list(q)
     end
@@ -195,12 +195,12 @@ defmodule QueueTest do
       n = 3 * 4096 + 7
 
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       assert n == Queue.count(q)
 
       popped = 4096 + 100
-      Queue.take(q, popped)
+      Queue.take_front(q, popped)
       assert n - popped == Queue.count(q)
     end
 
@@ -208,8 +208,8 @@ defmodule QueueTest do
       q = Queue.new()
 
       Enum.reduce(1..50, 0, fn i, expected ->
-        Queue.extend(q, Enum.to_list(1..i))
-        popped = length(Queue.take(q, div(i, 2)))
+        Queue.extend_back(q, Enum.to_list(1..i))
+        popped = length(Queue.take_front(q, div(i, 2)))
 
         expected = expected + i - popped
         assert expected == Queue.count(q)
@@ -327,11 +327,11 @@ defmodule QueueTest do
       assert :b == Queue.pop_front(q)
     end
 
-    test "interleaves correctly with extend/2" do
+    test "interleaves correctly with extend_back/2" do
       q = Queue.new()
 
       Queue.push_back(q, 1)
-      Queue.extend(q, [2, 3])
+      Queue.extend_back(q, [2, 3])
       Queue.push_back(q, 4)
 
       assert [1, 2, 3, 4] == Queue.to_list(q)
@@ -367,18 +367,18 @@ defmodule QueueTest do
     end
   end
 
-  describe "extend/2" do
+  describe "extend_back/2" do
     test "returns the same queue it was given" do
       q = Queue.new()
 
-      assert q == Queue.extend(q, [:a])
+      assert q == Queue.extend_back(q, [:a])
     end
 
     test "mutates in place, so the return value and the original alias" do
       q = Queue.new()
-      q2 = Queue.extend(q, [:a, :b])
+      q2 = Queue.extend_back(q, [:a, :b])
 
-      Queue.extend(q2, [:c])
+      Queue.extend_back(q2, [:c])
 
       assert [:a, :b, :c] == Queue.to_list(q)
       assert 3 == Queue.count(q)
@@ -387,8 +387,8 @@ defmodule QueueTest do
     test "can be piped" do
       q =
         Queue.new()
-        |> Queue.extend([1, 2])
-        |> Queue.extend([3, 4])
+        |> Queue.extend_back([1, 2])
+        |> Queue.extend_back([3, 4])
 
       assert [1, 2, 3, 4] == Queue.to_list(q)
     end
@@ -396,8 +396,8 @@ defmodule QueueTest do
     test "appends in list order, to the back" do
       q = Queue.new()
 
-      Queue.extend(q, [:a, :b])
-      Queue.extend(q, [:c, :d])
+      Queue.extend_back(q, [:a, :b])
+      Queue.extend_back(q, [:c, :d])
 
       assert [:a, :b, :c, :d] == Queue.to_list(q)
       assert :a == Queue.pop_front(q)
@@ -406,19 +406,19 @@ defmodule QueueTest do
     test "an empty list is a no-op" do
       q = Queue.new()
 
-      Queue.extend(q, [])
+      Queue.extend_back(q, [])
       assert 0 == Queue.count(q)
       assert [] == Queue.to_list(q)
 
-      Queue.extend(q, [:a])
-      Queue.extend(q, [])
+      Queue.extend_back(q, [:a])
+      Queue.extend_back(q, [])
       assert [:a] == Queue.to_list(q)
     end
 
     test "a single-element list behaves like push_back/2" do
       q = Queue.new()
 
-      Queue.extend(q, [:only])
+      Queue.extend_back(q, [:only])
 
       assert [:only] == Queue.to_list(q)
       assert 1 == Queue.count(q)
@@ -428,7 +428,7 @@ defmodule QueueTest do
       terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
       assert terms == Queue.to_list(q)
     end
@@ -441,7 +441,7 @@ defmodule QueueTest do
       ]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
       assert terms == Queue.to_list(q)
     end
@@ -449,7 +449,7 @@ defmodule QueueTest do
     test "keeps duplicates as separate elements" do
       q = Queue.new()
 
-      Queue.extend(q, [:dup, :dup, :dup])
+      Queue.extend_back(q, [:dup, :dup, :dup])
 
       assert [:dup, :dup, :dup] == Queue.to_list(q)
       assert 3 == Queue.count(q)
@@ -462,7 +462,7 @@ defmodule QueueTest do
 
       pid =
         spawn(fn ->
-          Queue.extend(q, [{:from_child, :binary.copy("y", 100_000)}])
+          Queue.extend_back(q, [{:from_child, :binary.copy("y", 100_000)}])
           send(parent, :pushed)
         end)
 
@@ -480,10 +480,10 @@ defmodule QueueTest do
       # first slab exactly and the second starts a new one.
       q = Queue.new()
 
-      Queue.extend(q, Enum.to_list(1..4096))
+      Queue.extend_back(q, Enum.to_list(1..4096))
       assert 4096 == Queue.count(q)
 
-      Queue.extend(q, [:overflow])
+      Queue.extend_back(q, [:overflow])
       assert 4097 == Queue.count(q)
       assert Enum.to_list(1..4096) ++ [:overflow] == Queue.to_list(q)
     end
@@ -492,7 +492,7 @@ defmodule QueueTest do
       expected = Enum.to_list(1..(3 * 4096 + 7))
 
       q = Queue.new()
-      Queue.extend(q, expected)
+      Queue.extend_back(q, expected)
 
       assert expected == Queue.to_list(q)
       assert length(expected) == Queue.count(q)
@@ -501,32 +501,32 @@ defmodule QueueTest do
     test "works on a queue that was drained" do
       q = Queue.new()
 
-      Queue.extend(q, [1, 2, 3])
-      assert [1, 2, 3] == Queue.take(q, 3)
+      Queue.extend_back(q, [1, 2, 3])
+      assert [1, 2, 3] == Queue.take_front(q, 3)
       assert 0 == Queue.count(q)
 
-      Queue.extend(q, [4, 5])
+      Queue.extend_back(q, [4, 5])
       assert [4, 5] == Queue.to_list(q)
     end
 
     test "interleaves correctly with push_back/2" do
       q = Queue.new()
 
-      Queue.extend(q, [1, 2])
+      Queue.extend_back(q, [1, 2])
       Queue.push_back(q, 3)
-      Queue.extend(q, [4, 5])
+      Queue.extend_back(q, [4, 5])
 
       assert [1, 2, 3, 4, 5] == Queue.to_list(q)
     end
 
     test "rejects a non-list without touching the queue" do
       q = Queue.new()
-      Queue.extend(q, [:a])
+      Queue.extend_back(q, [:a])
 
       # Passed through Enum.random/1 so the type checker doesn't flag the
       # deliberately-wrong literal at compile time.
       not_a_list = Enum.random([:not_a_list])
-      assert_raise FunctionClauseError, fn -> Queue.extend(q, not_a_list) end
+      assert_raise FunctionClauseError, fn -> Queue.extend_back(q, not_a_list) end
 
       assert [:a] == Queue.to_list(q)
       assert 1 == Queue.count(q)
@@ -536,21 +536,21 @@ defmodule QueueTest do
     #
     # test "rejects an improper list without touching the queue" do
     #   q = Queue.new()
-    #   Queue.extend(q, [:a])
+    #   Queue.extend_back(q, [:a])
 
     #   # NOTE: `is_list/1` is true for any cons cell, so rustler's list decoder
     #   # starts iterating and then panics part-way through instead of failing
     #   # the decode. That surfaces as `:nif_panicked` rather than the
     #   # ArgumentError a normal decode failure raises. See the non-list test
     #   # above for the well-behaved case.
-    #   assert_raise ErlangError, fn -> Queue.extend(q, [:b | :c]) end
+    #   assert_raise ErlangError, fn -> Queue.extend_back(q, [:b | :c]) end
 
     #   assert [:a] == Queue.to_list(q)
     #   assert 1 == Queue.count(q)
     # end
 
     test "each concurrent batch lands contiguously" do
-      # extend holds the queue lock for the whole batch, so batches
+      # extend_back holds the queue lock for the whole batch, so batches
       # may interleave with each other but must never be split apart.
       q = Queue.new()
       batch_size = 500
@@ -558,7 +558,7 @@ defmodule QueueTest do
       tasks =
         for p <- 1..10 do
           Task.async(fn ->
-            Queue.extend(q, for(i <- 1..batch_size, do: {p, i}))
+            Queue.extend_back(q, for(i <- 1..batch_size, do: {p, i}))
           end)
         end
 
@@ -595,7 +595,7 @@ defmodule QueueTest do
 
     test "returns elements in insertion order" do
       q = Queue.new()
-      Queue.extend(q, [:a, :b, :c])
+      Queue.extend_back(q, [:a, :b, :c])
 
       assert :a == Queue.pop_front(q)
       assert :b == Queue.pop_front(q)
@@ -605,7 +605,7 @@ defmodule QueueTest do
 
     test "removes the element it returns" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
       assert 1 == Queue.pop_front(q)
       assert [2, 3] == Queue.to_list(q)
@@ -627,7 +627,7 @@ defmodule QueueTest do
       terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
       assert terms == Enum.map(terms, fn _ -> Queue.pop_front(q) end)
     end
@@ -640,7 +640,7 @@ defmodule QueueTest do
       ]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
       assert terms == Enum.map(terms, fn _ -> Queue.pop_front(q) end)
     end
@@ -650,7 +650,7 @@ defmodule QueueTest do
       # across several slab boundaries one element at a time.
       n = 2 * 4096 + 7
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       Enum.each(1..n, fn i ->
         assert i == Queue.pop_front(q)
@@ -663,7 +663,7 @@ defmodule QueueTest do
 
     test "works again after the queue was drained" do
       q = Queue.new()
-      Queue.extend(q, [1, 2])
+      Queue.extend_back(q, [1, 2])
 
       assert 1 == Queue.pop_front(q)
       assert 2 == Queue.pop_front(q)
@@ -673,14 +673,14 @@ defmodule QueueTest do
       assert 3 == Queue.pop_front(q)
     end
 
-    test "interleaves correctly with take/2" do
+    test "interleaves correctly with take_front/2" do
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..6))
+      Queue.extend_back(q, Enum.to_list(1..6))
 
       assert 1 == Queue.pop_front(q)
-      assert [2, 3] == Queue.take(q, 2)
+      assert [2, 3] == Queue.take_front(q, 2)
       assert 4 == Queue.pop_front(q)
-      assert [5, 6] == Queue.take(q, 10)
+      assert [5, 6] == Queue.take_front(q, 10)
       assert nil == Queue.pop_front(q)
     end
 
@@ -703,7 +703,7 @@ defmodule QueueTest do
     test "hands each element to exactly one concurrent popper" do
       n = 5_000
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       tasks =
         for _ <- 1..10 do
@@ -720,55 +720,55 @@ defmodule QueueTest do
     end
   end
 
-  describe "take/2" do
+  describe "take_front/2" do
     test "an empty queue returns an empty list" do
-      assert [] == Queue.take(Queue.new(), 5)
+      assert [] == Queue.take_front(Queue.new(), 5)
     end
 
     test "returns elements in order and removes them" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3, 4, 5])
+      Queue.extend_back(q, [1, 2, 3, 4, 5])
 
-      assert [1, 2, 3] == Queue.take(q, 3)
+      assert [1, 2, 3] == Queue.take_front(q, 3)
       assert [4, 5] == Queue.to_list(q)
       assert 2 == Queue.count(q)
     end
 
     test "asking for zero elements is a no-op" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      assert [] == Queue.take(q, 0)
+      assert [] == Queue.take_front(q, 0)
       assert [1, 2, 3] == Queue.to_list(q)
       assert 3 == Queue.count(q)
     end
 
     test "asking for one element behaves like pop_front/1" do
       q = Queue.new()
-      Queue.extend(q, [:a, :b])
+      Queue.extend_back(q, [:a, :b])
 
-      assert [:a] == Queue.take(q, 1)
+      assert [:a] == Queue.take_front(q, 1)
       assert :b == Queue.pop_front(q)
     end
 
     test "asking for more than is available returns what there is" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      assert [1, 2, 3] == Queue.take(q, 1000)
+      assert [1, 2, 3] == Queue.take_front(q, 1000)
       assert [] == Queue.to_list(q)
       assert 0 == Queue.count(q)
 
-      assert [] == Queue.take(q, 1000)
+      assert [] == Queue.take_front(q, 1000)
     end
 
     test "preserves arbitrary terms" do
       terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
-      assert terms == Queue.take(q, length(terms))
+      assert terms == Queue.take_front(q, length(terms))
     end
 
     test "preserves large and deeply nested terms" do
@@ -779,9 +779,9 @@ defmodule QueueTest do
       ]
 
       q = Queue.new()
-      Queue.extend(q, terms)
+      Queue.extend_back(q, terms)
 
-      assert terms == Queue.take(q, 3)
+      assert terms == Queue.take_front(q, 3)
     end
 
     test "a single call can span many slabs" do
@@ -790,9 +790,9 @@ defmodule QueueTest do
       expected = Enum.to_list(1..(3 * 4096 + 7))
 
       q = Queue.new()
-      Queue.extend(q, expected)
+      Queue.extend_back(q, expected)
 
-      assert expected == Queue.take(q, length(expected))
+      assert expected == Queue.take_front(q, length(expected))
       assert 0 == Queue.count(q)
       assert [] == Queue.to_list(q)
     end
@@ -802,10 +802,10 @@ defmodule QueueTest do
       chunk = 1000
 
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       drained =
-        Stream.repeatedly(fn -> Queue.take(q, chunk) end)
+        Stream.repeatedly(fn -> Queue.take_front(q, chunk) end)
         |> Enum.take_while(&(&1 != []))
         |> List.flatten()
 
@@ -815,46 +815,46 @@ defmodule QueueTest do
 
     test "a pop that lands exactly on a slab boundary leaves the rest intact" do
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..(4096 + 5)))
+      Queue.extend_back(q, Enum.to_list(1..(4096 + 5)))
 
-      assert Enum.to_list(1..4096) == Queue.take(q, 4096)
+      assert Enum.to_list(1..4096) == Queue.take_front(q, 4096)
       assert 5 == Queue.count(q)
       assert Enum.to_list(4097..4101) == Queue.to_list(q)
-      assert Enum.to_list(4097..4101) == Queue.take(q, 5)
+      assert Enum.to_list(4097..4101) == Queue.take_front(q, 5)
     end
 
     test "works again after the queue was drained" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
-      assert [1, 2, 3] == Queue.take(q, 3)
-      assert [] == Queue.take(q, 3)
+      assert [1, 2, 3] == Queue.take_front(q, 3)
+      assert [] == Queue.take_front(q, 3)
 
-      Queue.extend(q, [4, 5])
-      assert [4, 5] == Queue.take(q, 3)
+      Queue.extend_back(q, [4, 5])
+      assert [4, 5] == Queue.take_front(q, 3)
     end
 
     test "sees elements pushed between pops" do
       q = Queue.new()
-      Queue.extend(q, [1, 2])
+      Queue.extend_back(q, [1, 2])
 
-      assert [1] == Queue.take(q, 1)
+      assert [1] == Queue.take_front(q, 1)
 
-      Queue.extend(q, [3, 4])
-      assert [2, 3] == Queue.take(q, 2)
+      Queue.extend_back(q, [3, 4])
+      assert [2, 3] == Queue.take_front(q, 2)
 
       Queue.push_back(q, 5)
-      assert [4, 5] == Queue.take(q, 5)
+      assert [4, 5] == Queue.take_front(q, 5)
     end
 
     test "rejects a negative count without touching the queue" do
       q = Queue.new()
-      Queue.extend(q, [:a])
+      Queue.extend_back(q, [:a])
 
       # Passed through Enum.random/1 so the type checker doesn't flag the
       # deliberately-wrong literal at compile time.
       negative = Enum.random([-1])
-      assert_raise FunctionClauseError, fn -> Queue.take(q, negative) end
+      assert_raise FunctionClauseError, fn -> Queue.take_front(q, negative) end
 
       assert [:a] == Queue.to_list(q)
       assert 1 == Queue.count(q)
@@ -862,28 +862,28 @@ defmodule QueueTest do
 
     test "rejects a non-integer count without touching the queue" do
       q = Queue.new()
-      Queue.extend(q, [:a])
+      Queue.extend_back(q, [:a])
 
       not_an_integer = Enum.random([:two])
-      assert_raise FunctionClauseError, fn -> Queue.take(q, not_an_integer) end
+      assert_raise FunctionClauseError, fn -> Queue.take_front(q, not_an_integer) end
 
       assert [:a] == Queue.to_list(q)
       assert 1 == Queue.count(q)
     end
 
     test "each concurrent batch is a contiguous run" do
-      # take holds the queue lock for the whole batch, so concurrent
+      # take_front holds the queue lock for the whole batch, so concurrent
       # callers may interleave with each other but no batch may be split.
       n = 5_000
       chunk = 100
 
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       tasks =
         for _ <- 1..10 do
           Task.async(fn ->
-            Stream.repeatedly(fn -> Queue.take(q, chunk) end)
+            Stream.repeatedly(fn -> Queue.take_front(q, chunk) end)
             |> Enum.take_while(&(&1 != []))
           end)
         end
@@ -909,28 +909,28 @@ defmodule QueueTest do
       # The protocol requires {:ok, count} | {:error, module}; anything else
       # blows up inside Enum.count/1.
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
       assert {:ok, 3} == Enumerable.count(q)
     end
 
     test "agrees with Queue.count/1" do
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..10))
+      Queue.extend_back(q, Enum.to_list(1..10))
 
       assert {:ok, Queue.count(q)} == Enumerable.count(q)
     end
 
     test "Enum.count/1 goes through the protocol" do
       q = Queue.new()
-      Queue.extend(q, [:a, :b, :c])
+      Queue.extend_back(q, [:a, :b, :c])
 
       assert 3 == Enum.count(q)
     end
 
     test "counting does not consume the queue" do
       q = Queue.new()
-      Queue.extend(q, [1, 2, 3])
+      Queue.extend_back(q, [1, 2, 3])
 
       assert 3 == Enum.count(q)
       assert 3 == Enum.count(q)
@@ -944,13 +944,13 @@ defmodule QueueTest do
       Queue.push_back(q, :a)
       assert 1 == Enum.count(q)
 
-      Queue.extend(q, [:b, :c])
+      Queue.extend_back(q, [:b, :c])
       assert 3 == Enum.count(q)
 
       Queue.pop_front(q)
       assert 2 == Enum.count(q)
 
-      Queue.take(q, 2)
+      Queue.take_front(q, 2)
       assert 0 == Enum.count(q)
     end
 
@@ -960,19 +960,19 @@ defmodule QueueTest do
       n = 3 * 4096 + 7
 
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..n))
+      Queue.extend_back(q, Enum.to_list(1..n))
 
       assert {:ok, n} == Enumerable.count(q)
 
       popped = 4096 + 100
-      Queue.take(q, popped)
+      Queue.take_front(q, popped)
 
       assert {:ok, n - popped} == Enumerable.count(q)
     end
 
     test "nil elements are counted like any other term" do
       q = Queue.new()
-      Queue.extend(q, [nil, nil, nil])
+      Queue.extend_back(q, [nil, nil, nil])
 
       assert 3 == Enum.count(q)
     end
@@ -990,17 +990,17 @@ defmodule QueueTest do
 
     test "agrees with the length of the enumerated contents" do
       q = Queue.new()
-      Queue.extend(q, Enum.to_list(1..100))
+      Queue.extend_back(q, Enum.to_list(1..100))
 
       Enum.each(1..10, fn _ ->
-        Queue.take(q, 7)
+        Queue.take_front(q, 7)
         assert Enum.count(q) == length(Enum.to_list(q))
       end)
     end
 
     test "Enum.at/3 indexes from the front of the queue" do
       q = Queue.new()
-      Queue.extend(q, [:a, :b, :c])
+      Queue.extend_back(q, [:a, :b, :c])
 
       assert :a == Enum.at(q, 0)
       assert :b == Enum.at(q, 1)

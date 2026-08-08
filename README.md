@@ -4,14 +4,14 @@ A shared, mutable, single-ended FIFO queue, optimized for bulk operations.
 
 ```elixir
 q = Queue.new()
-Queue.extend(q, [1, 2, 3])
+Queue.extend_back(q, [1, 2, 3])
 Queue.count(q)
 #=> 3
 Queue.pop_front(q)
 #=> 1
-Queue.take(q, 3)
+Queue.take_front(q, 3)
 #=> [2, 3]
-Queue.take(q, 3)
+Queue.take_front(q, 3)
 #=> []
 Queue.push_back(q, 99)
 Queue.to_list(q)

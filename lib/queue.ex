@@ -30,8 +30,12 @@ defmodule Queue do
   `push_back/2` acquires a lock to add only a single item, so calling it in
   a hot loop results in many repeated lock acquisitions.
   """
-  def extend(queue, list) when is_list(list) do
-    extend_impl(queue, list)
+  def extend_back(queue, list) when is_list(list) do
+    extend_back_impl(queue, list)
+  end
+
+  def extend_front(_queue, list) when is_list(list) do
+    raise "todo"
   end
 
   @doc """
@@ -40,12 +44,16 @@ defmodule Queue do
 
   Returns less than `n` items if `len(queue)` < `n`.
   """
-  def take(queue, n) when is_integer(n) and n >= 0 do
+  def take_front(queue, n) when is_integer(n) and n >= 0 do
     if n <= 1024 do
-      take_small(queue, n)
+      take_front_small(queue, n)
     else
-      take_large(queue, n)
+      take_front_large(queue, n)
     end
+  end
+
+  def take_back(_queue, n) when is_integer(n) and n >= 0 do
+    raise "todo"
   end
 
   @doc """
@@ -77,10 +85,10 @@ defmodule Queue do
   """
   def count(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
-  defp extend_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
+  defp extend_back_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
 
-  defp take_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
-  defp take_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+  defp take_front_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+  defp take_front_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 # TODO these impls can be sped up to use native functions

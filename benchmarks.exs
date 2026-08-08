@@ -34,8 +34,8 @@ defmodule ErlangQueueServer do
     GenServer.call(server, :out)
   end
 
-  def take(server, n) do
-    GenServer.call(server, {:take, n})
+  def take_front(server, n) do
+    GenServer.call(server, {:take_front, n})
   end
 
   def handle_cast({:in, el}, q) do
@@ -60,7 +60,7 @@ defmodule ErlangQueueServer do
     end
   end
 
-  def handle_call({:take, n}, _from, q) do
+  def handle_call({:take_front, n}, _from, q) do
     {q2, q3} = :queue.split(n, q)
     {:reply, q2, q3}
   end
@@ -76,56 +76,57 @@ Benchee.run(
       end)
     end,
     ":queue.split/2" => fn {_q, _erl_q, n} ->
-      ErlangQueueServer.take(erl_q_server, n)
+      ErlangQueueServer.take_front(erl_q_server, n)
     end,
     "Queue.pop_front/1" => fn {q, _erl_q, n} ->
       Enum.each(1..n, fn _ ->
         Queue.pop_front(q)
       end)
     end,
-    "Queue.take/2" => fn {q, _erl_q, n} ->
-      Queue.take(q, n)
+    "Queue.take_front/2" => fn {q, _erl_q, n} ->
+      Queue.take_front(q, n)
     end
   },
   warmup: 2,
   time: 5,
   before_each: fn input ->
     {
-      Queue.new() |> Queue.extend(input),
+      Queue.new() |> Queue.extend_back(input),
       ErlangQueueServer.set(erl_q_server, input),
       trunc(Enum.count(input) / 2)
     }
   end,
   inputs: inputs,
+  exclude_outliers: true,
   print: [fast_warning: false]
 )
 
-Benchee.run(
-  %{
-    "Queue.push_back/2" => fn {q, _, input} ->
-      Enum.each(input, fn i -> Queue.push_back(q, i) end)
-    end,
-    "Queue.extend/2" => fn {q, _, input} -> Queue.extend(q, input) end,
-    ":queue.in/2 - async" => fn {_q, _, input} ->
-      Enum.each(input, fn i ->
-        ErlangQueueServer.in_async(erl_q_server, i)
-      end)
-    end,
-    ":queue.in/2 - sync" => fn {_q, _, input} ->
-      Enum.each(input, fn i ->
-        ErlangQueueServer.in_sync(erl_q_server, i)
-      end)
-    end
-  },
-  warmup: 2,
-  time: 3,
-  before_each: fn input ->
-    {
-      Queue.new(),
-      ErlangQueueServer.set(erl_q_server, []),
-      input
-    }
-  end,
-  inputs: inputs,
-  print: [fast_warning: false]
-)
+# Benchee.run(
+#   %{
+#     "Queue.push_back/2" => fn {q, _, input} ->
+#       Enum.each(input, fn i -> Queue.push_back(q, i) end)
+#     end,
+#     "Queue.extend/2" => fn {q, _, input} -> Queue.extend_back(q, input) end,
+#     ":queue.in/2 - async" => fn {_q, _, input} ->
+#       Enum.each(input, fn i ->
+#         ErlangQueueServer.in_async(erl_q_server, i)
+#       end)
+#     end,
+#     ":queue.in/2 - sync" => fn {_q, _, input} ->
+#       Enum.each(input, fn i ->
+#         ErlangQueueServer.in_sync(erl_q_server, i)
+#       end)
+#     end
+#   },
+#   warmup: 2,
+#   time: 3,
+#   before_each: fn input ->
+#     {
+#       Queue.new(),
+#       ErlangQueueServer.set(erl_q_server, []),
+#       input
+#     }
+#   end,
+#   inputs: inputs,
+#   print: [fast_warning: false]
+# )
