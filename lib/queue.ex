@@ -69,11 +69,19 @@ defmodule Queue do
   """
   def push_back(_queue, _term), do: :erlang.nif_error(:nif_not_loaded)
 
+  def push_front(_queue, _term) do
+    raise "todo"
+  end
+
   @doc """
   Remove the first item from the head of the queue, or `nil`
   if the queue is empty.
   """
   def pop_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
+
+  def pop_back(_queue) do
+    raise "todo"
+  end
 
   @doc """
   Returns the contents of the queue as a list.
