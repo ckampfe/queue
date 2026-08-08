@@ -86,6 +86,7 @@ impl QueueImpl {
         let slab = if let Some(slab) = self.slabs.back_mut() {
             slab
         } else {
+            self.end_slab_position = 0;
             self.slabs.push_back_mut(Slab::new())
         };
 
@@ -156,8 +157,6 @@ impl QueueImpl {
                 self.front_slab_position = 0;
                 is_last_slab = self.slabs.len() == 1;
 
-                // If that emptied the queue, reset the write position too so the
-                // next push_back starts a fresh slab from the beginning.
                 if self.slabs.is_empty() {
                     self.end_slab_position = 0;
                 }
