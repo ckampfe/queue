@@ -55,7 +55,7 @@ impl QueueImpl {
 
             let length_to_write = range_in_slab.end - range_in_slab.start;
             position_in_terms_end = position_in_terms_start + length_to_write;
-            slab.write(
+            slab.write_many(
                 self.end_slab_position,
                 &terms[position_in_terms_start..position_in_terms_end],
             );
@@ -89,7 +89,7 @@ impl QueueImpl {
             self.slabs.push_back_mut(Slab::new())
         };
 
-        slab.push(self.end_slab_position, term);
+        slab.write_one(self.end_slab_position, term);
         self.end_slab_position += 1;
 
         if self.end_slab_position >= SLAB_SIZE {
@@ -108,9 +108,9 @@ impl QueueImpl {
     fn take<'env>(&mut self, caller_env: Env<'env>, n: usize) -> Vec<Term<'env>> {
         let mut terms = Vec::with_capacity(min(n, self.len()));
         let mut remaining = n;
+        let mut is_last_slab = self.slabs.len() == 1;
 
         while remaining > 0 {
-            let is_last_slab = self.slabs.len() == 1;
             // Read as much as we can out of the current front slab.
             // `exhausted` means the front slab has no more elements to give,
             // so we should discard it and move on to the next slab.
@@ -134,13 +134,7 @@ impl QueueImpl {
                     let take_here = min(available, remaining);
                     let end = start + take_here;
 
-                    slab.env.run(|owned_env| {
-                        let term_iter = slab.data[start..end].iter().map(|saved_term| {
-                            unsafe { Term::new(owned_env, *saved_term) }.in_env(caller_env)
-                        });
-
-                        terms.extend(term_iter);
-                    });
+                    slab.copy_out_of(start..end, &mut terms, caller_env);
 
                     remaining -= take_here;
                     (
@@ -160,6 +154,7 @@ impl QueueImpl {
                 // Discard the drained slab, always — including the last one.
                 self.slabs.pop_front();
                 self.front_slab_position = 0;
+                is_last_slab = self.slabs.len() == 1;
 
                 // If that emptied the queue, reset the write position too so the
                 // next push_back starts a fresh slab from the beginning.
@@ -193,19 +188,13 @@ impl QueueImpl {
                 continue;
             }
 
-            slab.env.run(|owned_env| {
-                let to_take = if is_last_slab {
-                    start..self.end_slab_position
-                } else {
-                    start..SLAB_SIZE
-                };
+            let to_take = if is_last_slab {
+                start..self.end_slab_position
+            } else {
+                start..SLAB_SIZE
+            };
 
-                let term_iter = slab.data[to_take].iter().map(|saved_term| {
-                    unsafe { Term::new(owned_env, *saved_term) }.in_env(caller_env)
-                });
-
-                terms.extend(term_iter);
-            });
+            slab.copy_out_of(to_take, &mut terms, caller_env);
         }
 
         terms
@@ -247,7 +236,7 @@ impl Slab {
     /// and the terms in it are freed.
     ///
     /// therefor the slab owns the terms
-    fn write(&mut self, begin: usize, terms: &[Term]) {
+    fn write_many(&mut self, begin: usize, terms: &[Term]) {
         let Slab { env, data } = self;
 
         env.run(|env| {
@@ -257,8 +246,37 @@ impl Slab {
         });
     }
 
-    fn push(&mut self, begin: usize, term: &Term) {
-        self.data[begin] = self.env.run(|env| term.in_env(env).as_c_arg());
+    /// write a single term into `position`
+    ///
+    /// SAFETY:
+    ///
+    /// same as `write_many`
+    fn write_one(&mut self, position: usize, term: &Term) {
+        self.data[position] = self.env.run(|env| term.in_env(env).as_c_arg());
+    }
+
+    /// Extend `target` with terms from the slab, at `range`.
+    ///
+    /// terms are copied into `target_env`.
+    ///
+    /// Does not modify the slab.
+    ///
+    /// SAFETY: copying the terms from the slab is safe because the terms
+    /// exist in the env on the slab. If the slab live, the env is live,
+    /// and the terms are live.
+    fn copy_out_of<'a>(
+        &self,
+        range: Range<usize>,
+        target: &mut Vec<Term<'a>>,
+        target_env: Env<'a>,
+    ) {
+        self.env.run(|owned_env| {
+            let term_iter = self.data[range]
+                .iter()
+                .map(|saved_term| unsafe { Term::new(owned_env, *saved_term) }.in_env(target_env));
+
+            target.extend(term_iter);
+        });
     }
 }
 
