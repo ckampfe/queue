@@ -240,9 +240,35 @@ defmodule Queue do
   """
   def pop_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
-  def pop_back(_queue) do
-    raise "todo"
-  end
+  @doc """
+  Remove the last item from the tail of the queue, or `nil`
+  if the queue is empty.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.pop_back(q)
+      :b
+      iex> Queue.pop_back(q)
+      :a
+      iex> Queue.pop_back(q)
+      nil
+
+  `nil` is a legal element, so the return value alone cannot tell you whether
+  the queue was empty. `count/1` can:
+
+      iex> q = Queue.new()
+      iex> Queue.push_back(q, nil)
+      iex> Queue.count(q)
+      1
+      iex> Queue.pop_back(q)
+      nil
+      iex> Queue.count(q)
+      0
+
+  """
+  def pop_back(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   View the item at the front of the queue if the queue is not empty,

@@ -1102,6 +1102,171 @@ defmodule QueueTest do
     end
   end
 
+  describe "pop_back/1" do
+    test "an empty queue returns nil" do
+      assert nil == Queue.pop_back(Queue.new())
+    end
+
+    test "an empty queue keeps returning nil" do
+      q = Queue.new()
+
+      assert nil == Queue.pop_back(q)
+      assert nil == Queue.pop_back(q)
+      assert 0 == Queue.count(q)
+    end
+
+    test "returns elements in reverse insertion order" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a, :b, :c])
+
+      assert :c == Queue.pop_back(q)
+      assert :b == Queue.pop_back(q)
+      assert :a == Queue.pop_back(q)
+      assert nil == Queue.pop_back(q)
+    end
+
+    test "removes the element it returns" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3])
+
+      assert 3 == Queue.pop_back(q)
+      assert [1, 2] == Queue.to_list(q)
+      assert 2 == Queue.count(q)
+    end
+
+    test "a popped nil is indistinguishable from an empty queue" do
+      # `nil` is a legal element, so the return value alone can't tell you
+      # whether the queue had anything in it. count/1 can.
+      q = Queue.new()
+      Queue.push_back(q, nil)
+
+      assert 1 == Queue.count(q)
+      assert nil == Queue.pop_back(q)
+      assert 0 == Queue.count(q)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      q = Queue.new()
+      Queue.extend_back(q, terms)
+
+      assert Enum.reverse(terms) == Enum.map(terms, fn _ -> Queue.pop_back(q) end)
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      q = Queue.new()
+      Queue.extend_back(q, terms)
+
+      assert Enum.reverse(terms) == Enum.map(terms, fn _ -> Queue.pop_back(q) end)
+    end
+
+    test "drains a queue that spans many slabs, in reverse order" do
+      # SLAB_SIZE on the Rust side is 2^12, so this walks the back position
+      # across several slab boundaries one element at a time.
+      n = 2 * 4096 + 7
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..n))
+
+      Enum.each(1..n, fn i ->
+        assert n - i + 1 == Queue.pop_back(q)
+        assert n - i == Queue.count(q)
+      end)
+
+      assert nil == Queue.pop_back(q)
+      assert [] == Queue.to_list(q)
+    end
+
+    test "works again after the queue was drained" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2])
+
+      assert 2 == Queue.pop_back(q)
+      assert 1 == Queue.pop_back(q)
+      assert nil == Queue.pop_back(q)
+
+      Queue.push_back(q, 3)
+      assert 3 == Queue.pop_back(q)
+    end
+
+    test "interleaves correctly with take_back/2" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..6))
+
+      assert 6 == Queue.pop_back(q)
+      assert [5, 4] == Queue.take_back(q, 2)
+      assert 3 == Queue.pop_back(q)
+      assert [2, 1] == Queue.take_back(q, 10)
+      assert nil == Queue.pop_back(q)
+    end
+
+    test "meets pop_front/1 in the middle" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..5))
+
+      assert 1 == Queue.pop_front(q)
+      assert 5 == Queue.pop_back(q)
+      assert 2 == Queue.pop_front(q)
+      assert 4 == Queue.pop_back(q)
+      assert 3 == Queue.pop_front(q)
+
+      assert 0 == Queue.count(q)
+      assert nil == Queue.pop_back(q)
+      assert nil == Queue.pop_front(q)
+    end
+
+    test "sees elements pushed between pops" do
+      q = Queue.new()
+
+      Queue.push_back(q, :a)
+      assert :a == Queue.pop_back(q)
+      assert nil == Queue.pop_back(q)
+
+      Queue.push_back(q, :b)
+      Queue.push_back(q, :c)
+      assert :c == Queue.pop_back(q)
+
+      Queue.push_back(q, :d)
+      assert :d == Queue.pop_back(q)
+      assert :b == Queue.pop_back(q)
+    end
+
+    test "sees elements pushed onto the front" do
+      q = Queue.new()
+      Queue.push_front(q, :b)
+      Queue.push_front(q, :a)
+
+      assert :b == Queue.pop_back(q)
+      assert :a == Queue.pop_back(q)
+      assert nil == Queue.pop_back(q)
+    end
+
+    test "hands each element to exactly one concurrent popper" do
+      n = 5_000
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..n))
+
+      tasks =
+        for _ <- 1..10 do
+          Task.async(fn ->
+            Stream.repeatedly(fn -> Queue.pop_back(q) end)
+            |> Enum.take_while(&(&1 != nil))
+          end)
+        end
+
+      popped = tasks |> Enum.flat_map(&Task.await(&1, 30_000))
+
+      assert Enum.to_list(1..n) == Enum.sort(popped)
+      assert 0 == Queue.count(q)
+    end
+  end
+
   describe "peek_front/1" do
     test "an empty queue returns nil" do
       assert nil == Queue.peek_front(Queue.new())

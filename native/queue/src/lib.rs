@@ -631,6 +631,12 @@ fn pop_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
 }
 
 #[rustler::nif]
+fn pop_back<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
+    let mut guard = queue.resource.inner.lock().unwrap();
+    guard.take_back(env, 1).pop()
+}
+
+#[rustler::nif]
 fn take_front_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take_front(env, n)
