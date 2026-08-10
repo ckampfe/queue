@@ -1,6 +1,6 @@
 # Queue
 
-A shared, mutable, single-ended FIFO queue, optimized for bulk operations.
+A shared, mutable, double-ended FIFO queue, optimized for bulk operations.
 
 
 [![Elixir CI](https://github.com/ckampfe/queue/actions/workflows/elixir.yml/badge.svg)](https://github.com/ckampfe/queue/actions/workflows/elixir.yml)
