@@ -81,9 +81,7 @@ defmodule Queue do
     raise "todo"
   end
 
-  def peek_front(_queue) do
-    raise "todo"
-  end
+  def peek_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   def peek_back(_queue) do
     raise "todo"

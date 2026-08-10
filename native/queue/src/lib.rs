@@ -221,7 +221,7 @@ impl QueueImpl {
                     let take_here = min(available, remaining);
                     let end = start + take_here;
 
-                    slab.copy_out_of(start..end, &mut terms, caller_env);
+                    slab.copy_many_out_of(start..end, &mut terms, caller_env);
 
                     remaining -= take_here;
                     (
@@ -252,6 +252,16 @@ impl QueueImpl {
         terms
     }
 
+    fn peek_front<'env>(&self, caller_env: Env<'env>) -> Option<Term<'env>> {
+        if let Some(slab) = self.slabs.front()
+            && self.len() != 0
+        {
+            Some(slab.copy_one_out_of(self.front_slab_position, caller_env))
+        } else {
+            None
+        }
+    }
+
     // like `take`, but reads every remaining element and leaves the slabs untouched:
     // start at self.front_slab_position in the front slab, then read each
     // subsequent slab in full, up to `self.end_slab_position` in the last slab.
@@ -279,7 +289,7 @@ impl QueueImpl {
                 start..SLAB_SIZE
             };
 
-            slab.copy_out_of(to_take, &mut terms, caller_env);
+            slab.copy_many_out_of(to_take, &mut terms, caller_env);
         }
 
         terms
@@ -351,6 +361,13 @@ impl Slab {
         self.data[position] = self.env.run(|env| term.in_env(env).as_c_arg());
     }
 
+    fn copy_one_out_of<'a>(&self, position: usize, target_env: Env<'a>) -> Term<'a> {
+        self.env.run(|owned_env| {
+            let saved_term = self.data[position];
+            unsafe { Term::new(owned_env, saved_term) }.in_env(target_env)
+        })
+    }
+
     /// Extend `target` with terms from the slab, at `range`.
     ///
     /// terms are copied into `target_env`.
@@ -360,10 +377,10 @@ impl Slab {
     /// SAFETY: copying the terms from the slab is safe because the terms
     /// exist in the env on the slab. If the slab live, the env is live,
     /// and the terms are live.
-    fn copy_out_of<'a>(
+    fn copy_many_out_of<'a>(
         &self,
         range: Range<usize>,
-        target: &mut Vec<Term<'a>>,
+        out: &mut Vec<Term<'a>>,
         target_env: Env<'a>,
     ) {
         self.env.run(|owned_env| {
@@ -371,7 +388,7 @@ impl Slab {
                 .iter()
                 .map(|saved_term| unsafe { Term::new(owned_env, *saved_term) }.in_env(target_env));
 
-            target.extend(term_iter);
+            out.extend(term_iter);
         });
     }
 }
@@ -520,6 +537,12 @@ fn take_front_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'e
 fn take_front_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take_front(env, n)
+}
+
+#[rustler::nif]
+fn peek_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
+    let guard = queue.resource.inner.lock().unwrap();
+    guard.peek_front(env)
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
