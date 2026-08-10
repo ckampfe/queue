@@ -13,6 +13,15 @@ defmodule Queue do
 
   @doc """
   Create a new queue
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.count(q)
+      0
+      iex> Queue.to_list(q)
+      []
+
   """
   def new(), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -29,14 +38,34 @@ defmodule Queue do
   This function acquires a lock 1 time, regardless of how many items you add.
   `push_back/2` acquires a lock to add only a single item, so calling it in
   a hot loop results in many repeated lock acquisitions.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.extend_back(q, [:c])
+      iex> Queue.to_list(q)
+      [:a, :b, :c]
+
+  An empty list leaves the queue alone:
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [:a])
+      iex> Queue.extend_back(q, [])
+      iex> Queue.to_list(q)
+      [:a]
+
   """
   def extend_back(queue, list) when is_list(list) do
     extend_back_impl(queue, list)
   end
 
   @doc """
-  Add a list of terms to the end of the queue atomically.
-  Terms are added in order.
+  Add a list of terms to the front of the queue atomically.
+
+  Each term is prepended in the order it appears in the list, so the batch
+  lands in the queue reversed: the last term of the list ends up at the very
+  front.
 
   You should almost always prefer using this function over `push_front/2`.
 
@@ -47,6 +76,23 @@ defmodule Queue do
   This function acquires a lock 1 time, regardless of how many items you add.
   `push_front/2` acquires a lock to add only a single item, so calling it in
   a hot loop results in many repeated lock acquisitions.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [:a, :b, :c])
+      iex> Queue.extend_front(q, [1, 2, 3])
+      iex> Queue.to_list(q)
+      [3, 2, 1, :a, :b, :c]
+
+  Each batch lands in front of the one before it:
+
+      iex> q = Queue.new()
+      iex> Queue.extend_front(q, [:a, :b])
+      iex> Queue.extend_front(q, [:c, :d])
+      iex> Queue.to_list(q)
+      [:d, :c, :b, :a]
+
   """
   def extend_front(queue, list) when is_list(list) do
     extend_front_impl(queue, list)
@@ -57,6 +103,18 @@ defmodule Queue do
   if the queue is empty.
 
   Returns less than `n` items if `len(queue)` < `n`.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [1, 2, 3, 4])
+      iex> Queue.take_front(q, 2)
+      [1, 2]
+      iex> Queue.take_front(q, 100)
+      [3, 4]
+      iex> Queue.take_front(q, 1)
+      []
+
   """
   def take_front(queue, n) when is_integer(n) and n >= 0 do
     if n <= 1024 do
@@ -80,6 +138,15 @@ defmodule Queue do
   This function acquires a lock to add a single item,
   whereas `extend_back/2` acquires a lock a single time to add
   an arbitrary number of items, resulting in much less lock contention.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.push_back(q, :a)
+      iex> Queue.push_back(q, :b)
+      iex> Queue.to_list(q)
+      [:a, :b]
+
   """
   def push_back(_queue, _term), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -93,12 +160,45 @@ defmodule Queue do
   This function acquires a lock to add a single item,
   whereas `extend_front/2` acquires a lock a single time to add
   an arbitrary number of items, resulting in much less lock contention.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.push_front(q, :b)
+      iex> Queue.push_front(q, :a)
+      iex> Queue.to_list(q)
+      [:a, :b]
+
   """
   def push_front(_queue, _term), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Remove the first item from the head of the queue, or `nil`
   if the queue is empty.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.pop_front(q)
+      :a
+      iex> Queue.pop_front(q)
+      :b
+      iex> Queue.pop_front(q)
+      nil
+
+  `nil` is a legal element, so the return value alone cannot tell you whether
+  the queue was empty. `count/1` can:
+
+      iex> q = Queue.new()
+      iex> Queue.push_back(q, nil)
+      iex> Queue.count(q)
+      1
+      iex> Queue.pop_front(q)
+      nil
+      iex> Queue.count(q)
+      0
+
   """
   def pop_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -111,6 +211,18 @@ defmodule Queue do
   `nil` if it is.
 
   Does not modify the queue.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.peek_front(q)
+      nil
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.peek_front(q)
+      :a
+      iex> Queue.count(q)
+      2
+
   """
   def peek_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -119,18 +231,55 @@ defmodule Queue do
   `nil` if it is.
 
   Does not modify the queue.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.peek_back(q)
+      nil
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.peek_back(q)
+      :b
+      iex> Queue.count(q)
+      2
+
   """
   def peek_back(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Returns the contents of the queue as a list.
   Does not modify the queue.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.to_list(q)
+      []
+      iex> Queue.extend_back(q, [1, 2, 3])
+      iex> Queue.to_list(q)
+      [1, 2, 3]
+      iex> Queue.to_list(q)
+      [1, 2, 3]
+
   """
   def to_list(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Returns the length of the queue.
   Does not modify the queue.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.count(q)
+      0
+      iex> Queue.extend_back(q, [:a, :b])
+      iex> Queue.count(q)
+      2
+      iex> Queue.pop_front(q)
+      iex> Queue.count(q)
+      1
+
   """
   def count(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
