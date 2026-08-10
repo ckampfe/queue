@@ -8,6 +8,7 @@ edition = "2024"
 crate-type = ["cdylib"]
 
 [dependencies]
+envparse = "0.1.0"
 rustler = "0.38"
 
 [profile.release]

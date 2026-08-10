@@ -9,7 +9,7 @@ use std::sync::Mutex;
 // See `Slab` for details of lifetime/safety.
 type NifTerm = usize;
 
-const SLAB_SIZE: usize = 2usize.pow(12);
+const SLAB_SIZE: usize = envparse::parse_env!("QUEUE_NIF_SLAB_SIZE" as usize (in 1..) else 4096);
 
 #[derive(NifStruct)]
 #[module = "Queue"]
@@ -584,6 +584,8 @@ rustler::init!("Elixir.Queue");
 
 #[cfg(test)]
 mod tests {
+    //! note that these tests are defined for a slab size of 4096 and will fail
+    //! with other slab sizes
     use crate::{Back, Front, SlabRangerator};
 
     #[test]
