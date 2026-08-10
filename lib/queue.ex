@@ -124,8 +124,46 @@ defmodule Queue do
     end
   end
 
-  def take_back(_queue, n) when is_integer(n) and n >= 0 do
-    raise "todo"
+  @doc """
+  Remove up to `n` items from the back of the queue, or an empty list
+  if the queue is empty.
+
+  Items come out back to front, as if `pop_back/1` had been called `n` times,
+  so a batch taken off one queue's back can be moved to another queue's front
+  with `extend_front/2` without reordering it.
+
+  Returns less than `n` items if `len(queue)` < `n`.
+
+  ## Examples
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [1, 2, 3, 4])
+      iex> Queue.take_back(q, 2)
+      [4, 3]
+      iex> Queue.to_list(q)
+      [1, 2]
+      iex> Queue.take_back(q, 100)
+      [2, 1]
+      iex> Queue.take_back(q, 1)
+      []
+
+  Moving items from the back of one queue to the front of another keeps their
+  order:
+
+      iex> q = Queue.new()
+      iex> Queue.extend_back(q, [1, 2, 3, 4])
+      iex> other = Queue.new()
+      iex> Queue.extend_front(other, Queue.take_back(q, 2))
+      iex> Queue.to_list(other)
+      [3, 4]
+
+  """
+  def take_back(queue, n) when is_integer(n) and n >= 0 do
+    if n <= 1024 do
+      take_back_small(queue, n)
+    else
+      take_back_large(queue, n)
+    end
   end
 
   @doc """
@@ -288,6 +326,9 @@ defmodule Queue do
 
   defp take_front_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
   defp take_front_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+
+  defp take_back_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
+  defp take_back_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
 end
 
 # TODO these impls can be sped up to use native functions

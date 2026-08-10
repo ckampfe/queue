@@ -1606,6 +1606,243 @@ defmodule QueueTest do
     end
   end
 
+  describe "take_back/2" do
+    test "an empty queue returns an empty list" do
+      assert [] == Queue.take_back(Queue.new(), 5)
+    end
+
+    test "returns elements back to front and removes them" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3, 4, 5])
+
+      assert [5, 4, 3] == Queue.take_back(q, 3)
+      assert [1, 2] == Queue.to_list(q)
+      assert 2 == Queue.count(q)
+    end
+
+    test "asking for zero elements is a no-op" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3])
+
+      assert [] == Queue.take_back(q, 0)
+      assert [1, 2, 3] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "asking for one element takes the last one" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a, :b])
+
+      assert [:b] == Queue.take_back(q, 1)
+      assert [:a] == Queue.to_list(q)
+    end
+
+    test "asking for more than is available returns what there is" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3])
+
+      assert [3, 2, 1] == Queue.take_back(q, 1000)
+      assert [] == Queue.to_list(q)
+      assert 0 == Queue.count(q)
+
+      assert [] == Queue.take_back(q, 1000)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      q = Queue.new()
+      Queue.extend_back(q, terms)
+
+      assert Enum.reverse(terms) == Queue.take_back(q, length(terms))
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      q = Queue.new()
+      Queue.extend_back(q, terms)
+
+      assert Enum.reverse(terms) == Queue.take_back(q, 3)
+    end
+
+    test "a single call can span many slabs" do
+      # SLAB_SIZE on the Rust side is 2^12, so one call has to walk across
+      # several exhausted slabs plus a partially filled one.
+      pushed = Enum.to_list(1..(3 * 4096 + 7))
+
+      q = Queue.new()
+      Queue.extend_back(q, pushed)
+
+      assert Enum.reverse(pushed) == Queue.take_back(q, length(pushed))
+      assert 0 == Queue.count(q)
+      assert [] == Queue.to_list(q)
+    end
+
+    test "repeated partial takes drain a multi-slab queue back to front" do
+      n = 3 * 4096
+      chunk = 1000
+
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..n))
+
+      drained =
+        Stream.repeatedly(fn -> Queue.take_back(q, chunk) end)
+        |> Enum.take_while(&(&1 != []))
+        |> List.flatten()
+
+      assert Enum.to_list(n..1//-1) == drained
+      assert 0 == Queue.count(q)
+    end
+
+    test "a take that lands exactly on a slab boundary leaves the rest intact" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..(4096 + 5)))
+
+      assert Enum.to_list(4101..4097//-1) == Queue.take_back(q, 5)
+      assert 4096 == Queue.count(q)
+      assert Enum.to_list(1..4096) == Queue.to_list(q)
+      assert Enum.to_list(4096..1//-1) == Queue.take_back(q, 4096)
+    end
+
+    test "empties the back slab, then keeps taking from the one before it" do
+      # The batch fills the first slab exactly, so the back slab is empty and
+      # has to be discarded before the take can make any progress.
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..4096))
+
+      assert [4096, 4095] == Queue.take_back(q, 2)
+      assert 4094 == Queue.count(q)
+      assert 4094 == Queue.peek_back(q)
+    end
+
+    test "pushing to the back still works after a slab was discarded" do
+      # Discarding a drained back slab leaves the back position at the end of
+      # a full slab, which push_back/2 has to roll over.
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..(4096 + 3)))
+
+      assert [4099, 4098, 4097] == Queue.take_back(q, 3)
+      assert 4096 == Queue.count(q)
+
+      Queue.push_back(q, :next)
+      assert :next == Queue.peek_back(q)
+      assert 4097 == Queue.count(q)
+      assert Enum.to_list(1..4096) ++ [:next] == Queue.to_list(q)
+    end
+
+    test "works again after the queue was drained" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3])
+
+      assert [3, 2, 1] == Queue.take_back(q, 3)
+      assert [] == Queue.take_back(q, 3)
+
+      Queue.extend_back(q, [4, 5])
+      assert [5, 4] == Queue.take_back(q, 3)
+    end
+
+    test "sees elements pushed between takes" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2])
+
+      assert [2] == Queue.take_back(q, 1)
+
+      Queue.extend_back(q, [3, 4])
+      assert [4, 3] == Queue.take_back(q, 2)
+
+      Queue.push_back(q, 5)
+      assert [5, 1] == Queue.take_back(q, 5)
+    end
+
+    test "interleaves correctly with take_front/2" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..6))
+
+      assert [1, 2] == Queue.take_front(q, 2)
+      assert [6, 5] == Queue.take_back(q, 2)
+      assert [3] == Queue.take_front(q, 1)
+      assert [4] == Queue.take_back(q, 10)
+      assert 0 == Queue.count(q)
+    end
+
+    test "takes from the front of a queue built only from the front" do
+      q = Queue.new()
+      Queue.extend_front(q, [1, 2, 3])
+
+      assert [3, 2, 1] == Queue.to_list(q)
+      assert [1, 2] == Queue.take_back(q, 2)
+      assert [3] == Queue.to_list(q)
+    end
+
+    test "moving a batch to another queue's front keeps its order" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..6))
+
+      other = Queue.new()
+      Queue.extend_front(other, Queue.take_back(q, 3))
+
+      assert [4, 5, 6] == Queue.to_list(other)
+      assert [1, 2, 3] == Queue.to_list(q)
+    end
+
+    test "rejects a negative count without touching the queue" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a])
+
+      # Passed through Enum.random/1 so the type checker doesn't flag the
+      # deliberately-wrong literal at compile time.
+      negative = Enum.random([-1])
+      assert_raise FunctionClauseError, fn -> Queue.take_back(q, negative) end
+
+      assert [:a] == Queue.to_list(q)
+      assert 1 == Queue.count(q)
+    end
+
+    test "rejects a non-integer count without touching the queue" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a])
+
+      not_an_integer = Enum.random([:two])
+      assert_raise FunctionClauseError, fn -> Queue.take_back(q, not_an_integer) end
+
+      assert [:a] == Queue.to_list(q)
+      assert 1 == Queue.count(q)
+    end
+
+    test "each concurrent batch is a contiguous run" do
+      # take_back holds the queue lock for the whole batch, so concurrent
+      # callers may interleave with each other but no batch may be split.
+      n = 5_000
+      chunk = 100
+
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..n))
+
+      tasks =
+        for _ <- 1..10 do
+          Task.async(fn ->
+            Stream.repeatedly(fn -> Queue.take_back(q, chunk) end)
+            |> Enum.take_while(&(&1 != []))
+          end)
+        end
+
+      batches = Enum.flat_map(tasks, &Task.await(&1, 30_000))
+
+      for batch <- batches do
+        [first | _] = batch
+        assert Enum.to_list(first..(first - length(batch) + 1)//-1) == batch
+      end
+
+      assert Enum.to_list(1..n) == batches |> List.flatten() |> Enum.sort()
+      assert 0 == Queue.count(q)
+    end
+  end
+
   describe "Enumerable" do
     test "a new queue counts zero" do
       assert {:ok, 0} == Enumerable.count(Queue.new())

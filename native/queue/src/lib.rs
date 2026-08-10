@@ -146,6 +146,11 @@ impl QueueImpl {
     }
 
     fn push_back(&mut self, term: &Term) {
+        if self.end_slab_position == SLAB_SIZE {
+            self.slabs.push_back(Slab::new());
+            self.end_slab_position = 0;
+        }
+
         let slab = if let Some(slab) = self.slabs.back_mut() {
             slab
         } else {
@@ -245,6 +250,67 @@ impl QueueImpl {
 
                 if self.slabs.is_empty() {
                     self.end_slab_position = 0;
+                }
+            }
+        }
+
+        terms
+    }
+
+    fn take_back<'env>(&mut self, caller_env: Env<'env>, n: usize) -> Vec<Term<'env>> {
+        let mut terms = Vec::with_capacity(min(n, self.len()));
+        let mut remaining = n;
+        let mut is_first_slab = self.slabs.len() == 1;
+
+        while remaining > 0 {
+            let (new_end_position, slab_is_exhausted) = {
+                let slab = match self.slabs.back_mut() {
+                    Some(slab) => slab,
+                    None => break,
+                };
+
+                let end = self.end_slab_position;
+
+                let available = if is_first_slab {
+                    end.saturating_sub(self.front_slab_position)
+                } else {
+                    end
+                };
+
+                if available == 0 {
+                    (end, true)
+                } else {
+                    let take_here = min(available, remaining);
+                    let start = end - take_here;
+
+                    slab.copy_many_out_of_rev(start..end, &mut terms, caller_env);
+
+                    remaining -= take_here;
+                    (
+                        start,
+                        if is_first_slab {
+                            start <= self.front_slab_position
+                        } else {
+                            start == 0
+                        },
+                    )
+                }
+            };
+
+            self.end_slab_position = new_end_position;
+
+            if slab_is_exhausted {
+                // Discard the drained slab, always — including the last one.
+                self.slabs.pop_back();
+                is_first_slab = self.slabs.len() == 1;
+
+                if self.slabs.is_empty() {
+                    self.front_slab_position = 0;
+                    self.end_slab_position = 0;
+                } else {
+                    // whichever slab is now the back was written all the way
+                    // to its end.
+                    self.end_slab_position = SLAB_SIZE;
                 }
             }
         }
@@ -408,6 +474,26 @@ impl Slab {
             out.extend(term_iter);
         });
     }
+
+    /// like `copy_many_out_of`, but appends the terms in reverse order:
+    /// the last term of `range` is appended to `out` first.
+    ///
+    /// SAFETY: same as `copy_many_out_of`
+    fn copy_many_out_of_rev<'a>(
+        &self,
+        range: Range<usize>,
+        out: &mut Vec<Term<'a>>,
+        target_env: Env<'a>,
+    ) {
+        self.env.run(|owned_env| {
+            let term_iter = self.data[range]
+                .iter()
+                .rev()
+                .map(|saved_term| unsafe { Term::new(owned_env, *saved_term) }.in_env(target_env));
+
+            out.extend(term_iter);
+        });
+    }
 }
 
 struct Front;
@@ -554,6 +640,18 @@ fn take_front_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'e
 fn take_front_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
     let mut guard = queue.resource.inner.lock().unwrap();
     guard.take_front(env, n)
+}
+
+#[rustler::nif]
+fn take_back_small<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+    let mut guard = queue.resource.inner.lock().unwrap();
+    guard.take_back(env, n)
+}
+
+#[rustler::nif(schedule = "DirtyCpu")]
+fn take_back_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'env>> {
+    let mut guard = queue.resource.inner.lock().unwrap();
+    guard.take_back(env, n)
 }
 
 #[rustler::nif]
