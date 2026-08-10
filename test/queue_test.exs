@@ -367,6 +367,167 @@ defmodule QueueTest do
     end
   end
 
+  describe "push_front/2" do
+    test "returns the same queue it was given" do
+      q = Queue.new()
+
+      assert q == Queue.push_front(q, :a)
+    end
+
+    test "mutates in place, so the return value and the original alias" do
+      q = Queue.new()
+      q2 = Queue.push_front(q, :a)
+
+      Queue.push_front(q2, :b)
+
+      assert [:b, :a] == Queue.to_list(q)
+      assert 2 == Queue.count(q)
+    end
+
+    test "can be piped" do
+      q =
+        Queue.new()
+        |> Queue.push_front(1)
+        |> Queue.push_front(2)
+        |> Queue.push_front(3)
+
+      assert [3, 2, 1] == Queue.to_list(q)
+    end
+
+    test "prepends to the front" do
+      q = Queue.new()
+
+      Queue.push_front(q, :first)
+      Queue.push_front(q, :second)
+
+      assert :second == Queue.pop_front(q)
+      assert :first == Queue.pop_front(q)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      q = Queue.new()
+      Enum.each(terms, &Queue.push_front(q, &1))
+
+      assert Enum.reverse(terms) == Queue.to_list(q)
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      q = Queue.new()
+      Enum.each(terms, &Queue.push_front(q, &1))
+
+      assert Enum.reverse(terms) == Queue.to_list(q)
+    end
+
+    test "keeps its own copy after the pushing process dies" do
+      q = Queue.new()
+      parent = self()
+
+      pid =
+        spawn(fn ->
+          Queue.push_front(q, {:from_child, :binary.copy("y", 100_000)})
+          send(parent, :pushed)
+        end)
+
+      ref = Process.monitor(pid)
+      assert_receive :pushed
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+
+      :erlang.garbage_collect()
+
+      assert [{:from_child, :binary.copy("y", 100_000)}] == Queue.to_list(q)
+    end
+
+    test "duplicate terms are kept as separate elements" do
+      q = Queue.new()
+
+      Enum.each(1..3, fn _ -> Queue.push_front(q, :dup) end)
+
+      assert [:dup, :dup, :dup] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "spans many slabs" do
+      pushed = Enum.to_list(1..(3 * 4096 + 7))
+
+      q = Queue.new()
+      Enum.each(pushed, &Queue.push_front(q, &1))
+
+      assert Enum.reverse(pushed) == Queue.to_list(q)
+      assert length(pushed) == Queue.count(q)
+    end
+
+    test "works on a queue that was drained" do
+      q = Queue.new()
+
+      Queue.push_front(q, :a)
+      assert :a == Queue.pop_front(q)
+      assert 0 == Queue.count(q)
+
+      Queue.push_front(q, :b)
+      assert [:b] == Queue.to_list(q)
+      assert :b == Queue.pop_front(q)
+    end
+
+    test "interleaves correctly with extend_front/2" do
+      q = Queue.new()
+
+      Queue.push_front(q, 1)
+      Queue.extend_front(q, [2, 3])
+      Queue.push_front(q, 4)
+
+      assert [4, 3, 2, 1] == Queue.to_list(q)
+    end
+
+    test "interleaves correctly with push_back/2" do
+      q = Queue.new()
+
+      Queue.push_back(q, :b)
+      Queue.push_front(q, :a)
+      Queue.push_back(q, :c)
+
+      assert [:a, :b, :c] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "keeps every element when pushed concurrently from many processes" do
+      q = Queue.new()
+      per_process = 500
+
+      tasks =
+        for p <- 1..10 do
+          Task.async(fn ->
+            for i <- 1..per_process do
+              Queue.push_front(q, {p, i})
+            end
+          end)
+        end
+
+      Enum.each(tasks, &Task.await(&1, 30_000))
+
+      list = Queue.to_list(q)
+
+      assert 10 * per_process == Queue.count(q)
+      assert 10 * per_process == length(list)
+
+      # Interleaving across processes is arbitrary, but each process's own
+      # pushes must stay in order relative to each other — reversed, since
+      # every push lands in front of the previous one.
+      by_process = Enum.group_by(list, &elem(&1, 0), &elem(&1, 1))
+
+      for p <- 1..10 do
+        assert Enum.to_list(per_process..1//-1) == by_process[p]
+      end
+    end
+  end
+
   describe "extend_back/2" do
     test "returns the same queue it was given" do
       q = Queue.new()
@@ -576,6 +737,227 @@ defmodule QueueTest do
       for run <- runs do
         [{p, _} | _] = run
         assert for(i <- 1..batch_size, do: {p, i}) == run
+      end
+    end
+  end
+
+  describe "extend_front/2" do
+    test "returns the same queue it was given" do
+      q = Queue.new()
+
+      assert q == Queue.extend_front(q, [:a])
+    end
+
+    test "mutates in place, so the return value and the original alias" do
+      q = Queue.new()
+      q2 = Queue.extend_front(q, [:a, :b])
+
+      Queue.extend_front(q2, [:c])
+
+      assert [:c, :b, :a] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "can be piped" do
+      q =
+        Queue.new()
+        |> Queue.extend_front([1, 2])
+        |> Queue.extend_front([3, 4])
+
+      assert [4, 3, 2, 1] == Queue.to_list(q)
+    end
+
+    test "prepends each item in list order, so the batch lands reversed at the front" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a, :b, :c])
+
+      Queue.extend_front(q, [1, 2, 3])
+
+      assert [3, 2, 1, :a, :b, :c] == Queue.to_list(q)
+      assert 3 == Queue.pop_front(q)
+    end
+
+    test "each batch lands in front of the previous one" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [:a, :b])
+      Queue.extend_front(q, [:c, :d])
+
+      assert [:d, :c, :b, :a] == Queue.to_list(q)
+      assert :d == Queue.pop_front(q)
+    end
+
+    test "an empty list is a no-op" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [])
+      assert 0 == Queue.count(q)
+      assert [] == Queue.to_list(q)
+
+      Queue.extend_front(q, [:a])
+      Queue.extend_front(q, [])
+      assert [:a] == Queue.to_list(q)
+    end
+
+    test "a single-element list prepends exactly one item" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [:only])
+
+      assert [:only] == Queue.to_list(q)
+      assert 1 == Queue.count(q)
+
+      Queue.extend_front(q, [:newest])
+
+      assert [:newest, :only] == Queue.to_list(q)
+      assert 2 == Queue.count(q)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      q = Queue.new()
+      Queue.extend_front(q, terms)
+
+      assert Enum.reverse(terms) == Queue.to_list(q)
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      q = Queue.new()
+      Queue.extend_front(q, terms)
+
+      assert Enum.reverse(terms) == Queue.to_list(q)
+    end
+
+    test "keeps duplicates as separate elements" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [:dup, :dup, :dup])
+
+      assert [:dup, :dup, :dup] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "keeps its own copy after the pushing process dies" do
+      q = Queue.new()
+      parent = self()
+      expected = [{:from_child, :binary.copy("y", 100_000)}]
+
+      pid =
+        spawn(fn ->
+          Queue.extend_front(q, [{:from_child, :binary.copy("y", 100_000)}])
+          send(parent, :pushed)
+        end)
+
+      ref = Process.monitor(pid)
+      assert_receive :pushed
+      assert_receive {:DOWN, ^ref, :process, ^pid, _}
+
+      :erlang.garbage_collect()
+
+      assert expected == Queue.to_list(q)
+    end
+
+    test "fills a slab exactly, then rolls over" do
+      # SLAB_SIZE on the Rust side is 2^12, so the first batch fills a slab
+      # exactly and the second starts a new one in front of it.
+      q = Queue.new()
+
+      Queue.extend_front(q, Enum.to_list(1..4096))
+      assert 4096 == Queue.count(q)
+
+      Queue.extend_front(q, [:overflow])
+      assert 4097 == Queue.count(q)
+      assert [:overflow | Enum.reverse(1..4096)] == Queue.to_list(q)
+    end
+
+    test "a single batch can span many slabs" do
+      terms = Enum.to_list(1..(3 * 4096 + 7))
+
+      q = Queue.new()
+      Queue.extend_front(q, terms)
+
+      assert Enum.reverse(terms) == Queue.to_list(q)
+      assert length(terms) == Queue.count(q)
+    end
+
+    test "works on a queue that was drained" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [1, 2, 3])
+      assert [3, 2, 1] == Queue.take_front(q, 3)
+      assert 0 == Queue.count(q)
+
+      Queue.extend_front(q, [4, 5])
+      assert [5, 4] == Queue.to_list(q)
+    end
+
+    test "interleaves correctly with extend_back/2" do
+      q = Queue.new()
+
+      Queue.extend_back(q, [1, 2])
+      Queue.extend_front(q, [0, -1])
+      Queue.extend_back(q, [3, 4])
+
+      assert [-1, 0, 1, 2, 3, 4] == Queue.to_list(q)
+    end
+
+    test "interleaves correctly with push_back/2" do
+      q = Queue.new()
+
+      Queue.extend_front(q, [1, 2])
+      Queue.push_back(q, 3)
+      Queue.extend_front(q, [4, 5])
+
+      assert [5, 4, 2, 1, 3] == Queue.to_list(q)
+    end
+
+    test "rejects a non-list without touching the queue" do
+      q = Queue.new()
+      Queue.extend_front(q, [:a])
+
+      # Passed through Enum.random/1 so the type checker doesn't flag the
+      # deliberately-wrong literal at compile time.
+      not_a_list = Enum.random([:not_a_list])
+      assert_raise FunctionClauseError, fn -> Queue.extend_front(q, not_a_list) end
+
+      assert [:a] == Queue.to_list(q)
+      assert 1 == Queue.count(q)
+    end
+
+    test "each concurrent batch lands contiguously" do
+      # extend_front holds the queue lock for the whole batch, so batches
+      # may interleave with each other but must never be split apart.
+      q = Queue.new()
+      batch_size = 500
+
+      tasks =
+        for p <- 1..10 do
+          Task.async(fn ->
+            Queue.extend_front(q, for(i <- 1..batch_size, do: {p, i}))
+          end)
+        end
+
+      Enum.each(tasks, &Task.await(&1, 30_000))
+
+      list = Queue.to_list(q)
+
+      assert 10 * batch_size == Queue.count(q)
+      assert 10 * batch_size == length(list)
+
+      runs = Enum.chunk_by(list, &elem(&1, 0))
+
+      assert 10 == length(runs)
+
+      for run <- runs do
+        [{p, _} | _] = run
+        assert for(i <- batch_size..1//-1, do: {p, i}) == run
       end
     end
   end

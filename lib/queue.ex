@@ -34,8 +34,8 @@ defmodule Queue do
     extend_back_impl(queue, list)
   end
 
-  def extend_front(_queue, list) when is_list(list) do
-    raise "todo"
+  def extend_front(queue, list) when is_list(list) do
+    extend_front_impl(queue, list)
   end
 
   @doc """
@@ -69,9 +69,7 @@ defmodule Queue do
   """
   def push_back(_queue, _term), do: :erlang.nif_error(:nif_not_loaded)
 
-  def push_front(_queue, _term) do
-    raise "todo"
-  end
+  def push_front(_queue, _term), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Remove the first item from the head of the queue, or `nil`
@@ -80,6 +78,14 @@ defmodule Queue do
   def pop_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   def pop_back(_queue) do
+    raise "todo"
+  end
+
+  def peek_front(_queue) do
+    raise "todo"
+  end
+
+  def peek_back(_queue) do
     raise "todo"
   end
 
@@ -94,6 +100,7 @@ defmodule Queue do
   def count(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   defp extend_back_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
+  defp extend_front_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
 
   defp take_front_small(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)
   defp take_front_large(_queue, _n), do: :erlang.nif_error(:nif_not_loaded)

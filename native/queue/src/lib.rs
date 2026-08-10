@@ -1,6 +1,7 @@
 use rustler::{Env, NifStruct, OwnedEnv, Resource, ResourceArc, Term};
 use std::cmp::min;
 use std::collections::VecDeque;
+use std::marker::PhantomData;
 use std::ops::Range;
 use std::sync::Mutex;
 
@@ -41,12 +42,16 @@ impl QueueImpl {
     /// first preallocating the memory for any slabs needed
     /// to fully accomodate the terms
     fn extend_back(&mut self, terms: &[Term]) {
-        self.reserve_slabs(terms.len());
+        if terms.is_empty() {
+            return;
+        }
+
+        self.reserve_slabs_back(terms.len());
 
         let mut position_in_terms_start: usize = 0;
         let mut position_in_terms_end: usize;
 
-        for range_in_slab in SlabRangerator::new(self.end_slab_position, terms.len()) {
+        for range_in_slab in SlabRangerator::<Back>::new(self.end_slab_position, terms.len()) {
             let slab = if let Some(slab) = self.slabs.back_mut() {
                 slab
             } else {
@@ -70,13 +75,71 @@ impl QueueImpl {
         }
     }
 
+    /// like `extend_back`, but writing towards the front of the queue.
+    ///
+    /// each term is prepended in list order, so the batch lands in the queue
+    /// reversed: the last term of `terms` ends up nearest the old front.
+    fn extend_front(&mut self, terms: &[Term]) {
+        if terms.is_empty() {
+            return;
+        }
+
+        self.reserve_slabs_front(terms.len());
+
+        // an empty queue has no slab to write into. start one and fill it from
+        // the top down, so the (empty) back of the queue stays at the slab's end.
+        if self.slabs.is_empty() {
+            self.slabs.push_back(Slab::new());
+            self.front_slab_position = SLAB_SIZE;
+            self.end_slab_position = SLAB_SIZE;
+        }
+
+        let mut position_in_terms_start: usize = 0;
+        let mut position_in_terms_end: usize;
+
+        for range_in_slab in SlabRangerator::<Front>::new(self.front_slab_position, terms.len()) {
+            let slab = if let Some(slab) = self.slabs.front_mut() {
+                slab
+            } else {
+                self.slabs.push_front_mut(Slab::new())
+            };
+
+            let length_to_write = range_in_slab.end - range_in_slab.start;
+            position_in_terms_end = position_in_terms_start + length_to_write;
+            slab.write_many_rev(
+                range_in_slab.start,
+                &terms[position_in_terms_start..position_in_terms_end],
+            );
+            self.front_slab_position = range_in_slab.start;
+
+            position_in_terms_start = position_in_terms_end;
+
+            if range_in_slab.start == 0 {
+                self.slabs.push_front(Slab::new());
+                self.front_slab_position = SLAB_SIZE;
+            }
+        }
+    }
+
     /// reserve the minimum number of slabs
     /// needed to fully store up to `n` terms
-    fn reserve_slabs(&mut self, n: usize) {
+    fn reserve_slabs_back(&mut self, n: usize) {
         let last_slab_remaining_capacity = SLAB_SIZE - self.end_slab_position;
 
         let new_slabs_required = n
             .saturating_sub(last_slab_remaining_capacity)
+            .div_ceil(SLAB_SIZE);
+
+        self.slabs.reserve_exact(new_slabs_required);
+    }
+
+    /// reserve the minimum number of slabs
+    /// needed to fully store up to `n` terms
+    fn reserve_slabs_front(&mut self, n: usize) {
+        let front_slab_remaining_capacity = self.front_slab_position;
+
+        let new_slabs_required = n
+            .saturating_sub(front_slab_remaining_capacity)
             .div_ceil(SLAB_SIZE);
 
         self.slabs.reserve_exact(new_slabs_required);
@@ -97,6 +160,29 @@ impl QueueImpl {
             self.slabs.push_back(Slab::new());
             self.end_slab_position = 0;
         }
+    }
+
+    fn push_front(&mut self, term: &Term) {
+        if self.slabs.is_empty() {
+            self.slabs.push_back(Slab::new());
+            self.front_slab_position = SLAB_SIZE;
+            self.end_slab_position = SLAB_SIZE;
+        }
+
+        if self.front_slab_position == 0 {
+            self.slabs.push_front(Slab::new());
+            self.front_slab_position = SLAB_SIZE;
+        }
+
+        self.front_slab_position -= 1;
+
+        let slab = if let Some(slab) = self.slabs.front_mut() {
+            slab
+        } else {
+            self.slabs.push_front_mut(Slab::new())
+        };
+
+        slab.write_one(self.front_slab_position, term);
     }
 
     // take elements:
@@ -245,6 +331,17 @@ impl Slab {
         });
     }
 
+    /// write the given terms in reverse at the given location.
+    fn write_many_rev(&mut self, begin: usize, terms: &[Term]) {
+        let Slab { env, data } = self;
+
+        env.run(|env| {
+            for (target, term) in data[begin..begin + terms.len()].iter_mut().rev().zip(terms) {
+                *target = term.in_env(env).as_c_arg();
+            }
+        });
+    }
+
     /// write a single term into `position`
     ///
     /// SAFETY:
@@ -279,26 +376,31 @@ impl Slab {
     }
 }
 
+struct Front;
+struct Back;
+
 /// an iterator to emit ranges for where in slabs to write an input of
 /// `remaining_input` into slabs of SLAB_SIZE,
 /// starting at `position`.
 ///
 /// see the tests for what this looks like
-struct SlabRangerator {
+struct SlabRangerator<DIRECTION> {
     position: usize,
     remaining_input: usize,
+    _direction: PhantomData<DIRECTION>,
 }
 
-impl SlabRangerator {
+impl<DIRECTION> SlabRangerator<DIRECTION> {
     fn new(position: usize, remaining_input: usize) -> Self {
         Self {
             position,
             remaining_input,
+            _direction: PhantomData,
         }
     }
 }
 
-impl Iterator for SlabRangerator {
+impl Iterator for SlabRangerator<Back> {
     type Item = Range<usize>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -313,6 +415,32 @@ impl Iterator for SlabRangerator {
                 self.position = 0;
             } else {
                 self.position = range_end;
+            }
+
+            self.remaining_input -= range_end - range_start;
+
+            Some(range_start..range_end)
+        } else {
+            None
+        }
+    }
+}
+
+impl Iterator for SlabRangerator<Front> {
+    type Item = Range<usize>;
+
+    /// each range is ascending, like the `Back` ranges, but they are yielded
+    /// walking towards the front: the first range is the one that ends at
+    /// `position`, and each subsequent range is in the slab before it.
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining_input > 0 {
+            let range_end = self.position;
+            let range_start = range_end.saturating_sub(self.remaining_input);
+
+            if range_start == 0 {
+                self.position = SLAB_SIZE;
+            } else {
+                self.position = range_start;
             }
 
             self.remaining_input -= range_end - range_start;
@@ -346,11 +474,31 @@ fn push_back(queue: Queue, term: Term) -> Queue {
     queue
 }
 
+#[rustler::nif]
+fn push_front(queue: Queue, term: Term) -> Queue {
+    {
+        let mut guard = queue.resource.inner.lock().unwrap();
+        guard.push_front(&term);
+    }
+
+    queue
+}
+
 #[rustler::nif(name = "extend_back_impl", schedule = "DirtyCpu")]
 fn extend_back(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
     {
         let mut guard = queue.resource.inner.lock().unwrap();
         guard.extend_back(&list_of_terms);
+    }
+
+    queue
+}
+
+#[rustler::nif(name = "extend_front_impl", schedule = "DirtyCpu")]
+fn extend_front(queue: Queue, list_of_terms: Vec<Term>) -> Queue {
+    {
+        let mut guard = queue.resource.inner.lock().unwrap();
+        guard.extend_front(&list_of_terms);
     }
 
     queue
@@ -390,17 +538,31 @@ rustler::init!("Elixir.Queue");
 
 #[cfg(test)]
 mod tests {
-    use crate::SlabRangerator;
+    use crate::{Back, Front, SlabRangerator};
 
     #[test]
-    fn rangerator_test() {
-        let ranges: Vec<_> = SlabRangerator::new(0, 4000).into_iter().collect();
+    fn rangerator_back_test() {
+        let ranges: Vec<_> = SlabRangerator::<Back>::new(0, 4000).collect();
         assert_eq!(ranges, vec![0..4000]);
 
-        let ranges: Vec<_> = SlabRangerator::new(4000, 1000).into_iter().collect();
+        let ranges: Vec<_> = SlabRangerator::<Back>::new(4000, 1000).collect();
         assert_eq!(ranges, vec![4000..4096, 0..904]);
 
-        let ranges: Vec<_> = SlabRangerator::new(4000, 5000).into_iter().collect();
+        let ranges: Vec<_> = SlabRangerator::<Back>::new(4000, 5000).collect();
         assert_eq!(ranges, vec![4000..4096, 0..4096, 0..808]);
+    }
+
+    #[test]
+    fn rangerator_front_test() {
+        // each range is ascending, but they are yielded front-ward: the first
+        // range is the one ending at the starting position.
+        let ranges: Vec<_> = SlabRangerator::<Front>::new(4000, 6000).collect();
+        assert_eq!(ranges, vec![0..4000, 2096..4096]);
+
+        let ranges: Vec<_> = SlabRangerator::<Front>::new(4000, 1000).collect();
+        assert_eq!(ranges, vec![3000..4000]);
+
+        let ranges: Vec<_> = SlabRangerator::<Front>::new(100, 5000).collect();
+        assert_eq!(ranges, vec![0..100, 0..4096, 3292..4096]);
     }
 }
