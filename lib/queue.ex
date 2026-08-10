@@ -83,9 +83,7 @@ defmodule Queue do
 
   def peek_front(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
-  def peek_back(_queue) do
-    raise "todo"
-  end
+  def peek_back(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc """
   Returns the contents of the queue as a list.

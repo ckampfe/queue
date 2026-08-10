@@ -1258,6 +1258,174 @@ defmodule QueueTest do
     end
   end
 
+  describe "peek_back/1" do
+    test "an empty queue returns nil" do
+      assert nil == Queue.peek_back(Queue.new())
+    end
+
+    test "an empty queue keeps returning nil" do
+      q = Queue.new()
+
+      assert nil == Queue.peek_back(q)
+      assert nil == Queue.peek_back(q)
+      assert 0 == Queue.count(q)
+    end
+
+    test "returns the last element without removing it" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a, :b, :c])
+
+      assert :c == Queue.peek_back(q)
+      assert :c == Queue.peek_back(q)
+      assert [:a, :b, :c] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+    end
+
+    test "follows the back as elements are pushed" do
+      q = Queue.new()
+
+      Queue.push_back(q, :a)
+      assert :a == Queue.peek_back(q)
+
+      Queue.push_back(q, :b)
+      assert :b == Queue.peek_back(q)
+
+      Queue.extend_back(q, [:c, :d])
+      assert :d == Queue.peek_back(q)
+    end
+
+    test "a peeked nil is indistinguishable from an empty queue" do
+      # `nil` is a legal element, so the return value alone can't tell you
+      # whether the queue had anything in it. count/1 can.
+      q = Queue.new()
+      Queue.push_back(q, nil)
+
+      assert 1 == Queue.count(q)
+      assert nil == Queue.peek_back(q)
+      assert 1 == Queue.count(q)
+    end
+
+    test "is unmoved by elements pushed onto the front" do
+      q = Queue.new()
+      Queue.extend_back(q, [:a, :b])
+
+      Queue.push_front(q, :z)
+      assert :b == Queue.peek_back(q)
+
+      Queue.extend_front(q, [:x, :y])
+      assert :b == Queue.peek_back(q)
+    end
+
+    test "sees elements that only ever reached the queue from the front" do
+      q = Queue.new()
+      Queue.extend_front(q, [1, 2, 3])
+
+      assert [3, 2, 1] == Queue.to_list(q)
+      assert 1 == Queue.peek_back(q)
+
+      Queue.push_front(q, 4)
+      assert 1 == Queue.peek_back(q)
+    end
+
+    test "a single element is both the front and the back" do
+      q = Queue.new()
+      Queue.push_back(q, :only)
+
+      assert :only == Queue.peek_front(q)
+      assert :only == Queue.peek_back(q)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      q = Queue.new()
+
+      for term <- terms do
+        Queue.push_back(q, term)
+        assert term == Queue.peek_back(q)
+      end
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      q = Queue.new()
+
+      for term <- terms do
+        Queue.push_back(q, term)
+        assert term == Queue.peek_back(q)
+      end
+    end
+
+    test "tracks the back across many slabs" do
+      # SLAB_SIZE on the Rust side is 2^12, so this walks the back position
+      # across several slab boundaries one element at a time.
+      n = 2 * 4096 + 7
+      q = Queue.new()
+
+      Enum.each(1..n, fn i ->
+        Queue.push_back(q, i)
+        assert i == Queue.peek_back(q)
+      end)
+    end
+
+    test "sees the last element when a slab is filled exactly" do
+      # The batch fills the first slab exactly, so the back position sits at
+      # the start of a fresh, empty slab.
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..4096))
+
+      assert 4096 == Queue.count(q)
+      assert 4096 == Queue.peek_back(q)
+
+      Queue.push_back(q, :overflow)
+      assert :overflow == Queue.peek_back(q)
+    end
+
+    test "follows the back as the queue is drained from the front" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2, 3])
+
+      assert 3 == Queue.peek_back(q)
+      assert 1 == Queue.pop_front(q)
+      assert 3 == Queue.peek_back(q)
+
+      assert [2, 3] == Queue.take_front(q, 2)
+      assert nil == Queue.peek_back(q)
+    end
+
+    test "works again after the queue was drained" do
+      q = Queue.new()
+      Queue.extend_back(q, [1, 2])
+
+      assert [1, 2] == Queue.take_front(q, 2)
+      assert nil == Queue.peek_back(q)
+
+      Queue.push_back(q, 3)
+      assert 3 == Queue.peek_back(q)
+      assert 1 == Queue.count(q)
+    end
+
+    test "concurrent peeks all see the same element" do
+      q = Queue.new()
+      Queue.extend_back(q, Enum.to_list(1..1000))
+
+      tasks =
+        for _ <- 1..10 do
+          Task.async(fn -> for _ <- 1..100, do: Queue.peek_back(q) end)
+        end
+
+      peeked = Enum.flat_map(tasks, &Task.await(&1, 30_000))
+
+      assert [1000] == Enum.uniq(peeked)
+      assert 1000 == Queue.count(q)
+    end
+  end
+
   describe "take_front/2" do
     test "an empty queue returns an empty list" do
       assert [] == Queue.take_front(Queue.new(), 5)

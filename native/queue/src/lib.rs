@@ -262,6 +262,23 @@ impl QueueImpl {
         }
     }
 
+    fn peek_back<'env>(&self, caller_env: Env<'env>) -> Option<Term<'env>> {
+        if self.len() == 0 {
+            return None;
+        }
+
+        // `end_slab_position` is one past the last element. when it is 0
+        // the back slab is empty, and the last live element is the
+        // final slot of the slab before it.
+        let (slab, position) = if self.end_slab_position == 0 {
+            (self.slabs.get(self.slabs.len() - 2)?, SLAB_SIZE - 1)
+        } else {
+            (self.slabs.back()?, self.end_slab_position - 1)
+        };
+
+        Some(slab.copy_one_out_of(position, caller_env))
+    }
+
     // like `take`, but reads every remaining element and leaves the slabs untouched:
     // start at self.front_slab_position in the front slab, then read each
     // subsequent slab in full, up to `self.end_slab_position` in the last slab.
@@ -543,6 +560,12 @@ fn take_front_large<'env>(env: Env<'env>, queue: Queue, n: usize) -> Vec<Term<'e
 fn peek_front<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
     let guard = queue.resource.inner.lock().unwrap();
     guard.peek_front(env)
+}
+
+#[rustler::nif]
+fn peek_back<'env>(env: Env<'env>, queue: Queue) -> Option<Term<'env>> {
+    let guard = queue.resource.inner.lock().unwrap();
+    guard.peek_back(env)
 }
 
 #[rustler::nif(schedule = "DirtyCpu")]
