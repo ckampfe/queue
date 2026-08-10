@@ -1,6 +1,6 @@
 # Queue
 
-A shared, mutable, double-ended FIFO queue, optimized for bulk operations.
+An Elixir NIF providing a shared, mutable, double-ended FIFO queue, optimized for bulk operations.
 
 
 [![Elixir CI](https://github.com/ckampfe/queue/actions/workflows/elixir.yml/badge.svg)](https://github.com/ckampfe/queue/actions/workflows/elixir.yml)
