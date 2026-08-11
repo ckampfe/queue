@@ -6,6 +6,7 @@ An Elixir NIF providing a shared, mutable, double-ended FIFO queue, optimized fo
 [![Elixir CI](https://github.com/ckampfe/queue/actions/workflows/elixir.yml/badge.svg)](https://github.com/ckampfe/queue/actions/workflows/elixir.yml)
 
 ```elixir
+Mix.install([{:queue, github: "ckampfe/queue"}])
 q = Queue.new()
 Queue.extend_back(q, [1, 2, 3])
 Queue.count(q)
