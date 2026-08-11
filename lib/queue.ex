@@ -328,6 +328,10 @@ defmodule Queue do
   """
   def to_list(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
+  def from_list(list) when is_list(list) do
+    from_list_impl(list)
+  end
+
   @doc """
   Returns the length of the queue.
   Does not modify the queue.
@@ -346,6 +350,8 @@ defmodule Queue do
 
   """
   def count(_queue), do: :erlang.nif_error(:nif_not_loaded)
+
+  def from_list_impl(_list), do: :erlang.nif_error(:nif_not_loaded)
 
   defp extend_back_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
   defp extend_front_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)

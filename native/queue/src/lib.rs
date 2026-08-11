@@ -685,6 +685,19 @@ fn to_list<'env>(env: Env<'env>, queue: Queue) -> Vec<Term<'env>> {
     guard.as_vec(env)
 }
 
+#[rustler::nif(name = "from_list_impl", schedule = "DirtyCpu")]
+fn from_list(list_of_terms: Vec<Term>) -> Queue {
+    let mut queue = QueueImpl::new();
+
+    queue.extend_back(&list_of_terms);
+
+    Queue {
+        resource: ResourceArc::new(QueueResource {
+            inner: Mutex::new(queue),
+        }),
+    }
+}
+
 #[rustler::nif]
 fn count(queue: Queue) -> usize {
     let guard = queue.resource.inner.lock().unwrap();

@@ -102,6 +102,133 @@ defmodule QueueTest do
     end
   end
 
+  describe "from_list/1" do
+    test "an empty list makes an empty queue" do
+      q = Queue.from_list([])
+
+      assert [] == Queue.to_list(q)
+      assert 0 == Queue.count(q)
+      assert nil == Queue.pop_front(q)
+    end
+
+    test "holds the elements in list order" do
+      q = Queue.from_list([:a, :b, :c])
+
+      assert [:a, :b, :c] == Queue.to_list(q)
+      assert 3 == Queue.count(q)
+      assert :a == Queue.peek_front(q)
+      assert :c == Queue.peek_back(q)
+    end
+
+    test "preserves arbitrary terms" do
+      terms = [nil, :atom, 1, -1.5, "binary", ~c"charlist", {1, :two}, [1, 2, 3], %{a: 1}, self()]
+
+      assert terms == terms |> Queue.from_list() |> Queue.to_list()
+    end
+
+    test "preserves large and deeply nested terms" do
+      terms = [
+        :binary.copy("x", 1_000_000),
+        Enum.reduce(1..1000, :leaf, fn i, acc -> {i, acc} end),
+        Map.new(1..1000, fn i -> {i, Integer.to_string(i)} end)
+      ]
+
+      assert terms == terms |> Queue.from_list() |> Queue.to_list()
+    end
+
+    test "matches a new queue extended with the same list" do
+      list = Enum.to_list(1..(2 * 4096 + 7))
+
+      extended = Queue.new()
+      Queue.extend_back(extended, list)
+
+      assert Queue.to_list(extended) == list |> Queue.from_list() |> Queue.to_list()
+    end
+
+    test "spans slab boundaries" do
+      # SLAB_SIZE on the Rust side is 2^12, so this covers several slabs
+      # plus a partially filled one.
+      expected = Enum.to_list(1..(3 * 4096 + 7))
+      q = Queue.from_list(expected)
+
+      assert expected == Queue.to_list(q)
+      assert length(expected) == Queue.count(q)
+      assert 1 == Queue.peek_front(q)
+      assert 3 * 4096 + 7 == Queue.peek_back(q)
+    end
+
+    test "handles a list that exactly fills a slab" do
+      for n <- [4096, 2 * 4096] do
+        q = Queue.from_list(Enum.to_list(1..n))
+
+        assert n == Queue.count(q)
+        assert 1 == Queue.peek_front(q)
+        assert n == Queue.peek_back(q)
+        assert n == Queue.pop_back(q)
+        assert 1 == Queue.pop_front(q)
+        assert n - 2 == Queue.count(q)
+      end
+    end
+
+    test "the queue it returns is fully usable" do
+      q = Queue.from_list([2, 3])
+
+      Queue.push_front(q, 1)
+      Queue.push_back(q, 4)
+      Queue.extend_front(q, [0])
+      Queue.extend_back(q, [5, 6])
+
+      assert [0, 1, 2, 3, 4, 5, 6] == Queue.to_list(q)
+      assert [0, 1] == Queue.take_front(q, 2)
+      assert [6, 5] == Queue.take_back(q, 2)
+      assert [2, 3, 4] == Queue.to_list(q)
+    end
+
+    test "each call returns an independent queue" do
+      list = [1, 2, 3]
+
+      a = Queue.from_list(list)
+      b = Queue.from_list(list)
+
+      assert 1 == Queue.pop_front(a)
+
+      assert [2, 3] == Queue.to_list(a)
+      assert [1, 2, 3] == Queue.to_list(b)
+    end
+
+    test "drains back to empty" do
+      q = Queue.from_list([1, 2, 3])
+
+      assert [1, 2, 3] == Queue.take_front(q, 10)
+      assert [] == Queue.to_list(q)
+      assert 0 == Queue.count(q)
+      assert nil == Queue.peek_front(q)
+      assert nil == Queue.peek_back(q)
+
+      Queue.push_back(q, 4)
+      assert [4] == Queue.to_list(q)
+    end
+
+    test "round-trips through to_list/1" do
+      list = Enum.to_list(1..5000)
+
+      assert list ==
+               list
+               |> Queue.from_list()
+               |> Queue.to_list()
+               |> Queue.from_list()
+               |> Queue.to_list()
+    end
+
+    test "raises when given something other than a list" do
+      # applied dynamically so the type checker doesn't reject the call at
+      # compile time; the guard is what we're exercising.
+      for not_a_list <- [:not_a_list, %{a: 1}, "abc", 1] do
+        assert_raise FunctionClauseError, fn -> apply(Queue, :from_list, [not_a_list]) end
+      end
+    end
+  end
+
   describe "count/1" do
     test "a new queue is empty" do
       assert 0 == Queue.count(Queue.new())
