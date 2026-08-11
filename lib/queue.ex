@@ -328,6 +328,34 @@ defmodule Queue do
   """
   def to_list(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc """
+  Create a new queue holding the terms of `list`.
+
+  The head of the list ends up at the front of the queue, so
+  `from_list/1` and `to_list/1` round trip.
+
+  This is equivalent to calling `new/0` and then `extend_back/2`,
+  but does both in a single call.
+
+  ## Examples
+
+      iex> q = Queue.from_list([:a, :b, :c])
+      iex> Queue.to_list(q)
+      [:a, :b, :c]
+      iex> Queue.count(q)
+      3
+      iex> Queue.pop_front(q)
+      :a
+
+  An empty list makes an empty queue:
+
+      iex> q = Queue.from_list([])
+      iex> Queue.count(q)
+      0
+      iex> Queue.pop_front(q)
+      nil
+
+  """
   def from_list(list) when is_list(list) do
     from_list_impl(list)
   end
@@ -351,7 +379,7 @@ defmodule Queue do
   """
   def count(_queue), do: :erlang.nif_error(:nif_not_loaded)
 
-  def from_list_impl(_list), do: :erlang.nif_error(:nif_not_loaded)
+  defp from_list_impl(_list), do: :erlang.nif_error(:nif_not_loaded)
 
   defp extend_back_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
   defp extend_front_impl(_queue, _list_of_terms), do: :erlang.nif_error(:nif_not_loaded)
