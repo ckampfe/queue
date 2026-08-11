@@ -31,8 +31,8 @@ defmodule MockParityTest do
 
   test "parity under randomized ops", ctx do
     ops = [
-      {:extend_back, fn -> [Enum.take_random(1..4000, :rand.uniform(6) - 1)] end},
-      {:extend_front, fn -> [Enum.take_random(1..4000, :rand.uniform(6) - 1)] end},
+      {:extend_back, fn -> [Enum.take_random(1..400, :rand.uniform(500) - 1)] end},
+      {:extend_front, fn -> [Enum.take_random(1..400, :rand.uniform(500) - 1)] end},
       {:push_back, fn -> [:rand.uniform(50)] end},
       {:push_front, fn -> [:rand.uniform(50)] end},
       {:take_front, fn -> [:rand.uniform(2000) - 1] end},
