@@ -1,6 +1,8 @@
 defmodule MockParityTest do
   use ExUnit.Case, async: true
 
+  @moduletag :property
+
   # Runs the same op sequence against the real NIF queue and the mock,
   # asserting every reply and the resulting contents agree.
 
