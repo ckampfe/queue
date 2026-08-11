@@ -5,13 +5,13 @@ defmodule MockParityTest do
   # asserting every reply and the resulting contents agree.
 
   setup do
-    pid = Queue.MockQueue.new()
+    pid = Queue.OracleQueue.new()
     {:ok, real_queue: Queue.new(), mock_queue: pid}
   end
 
   defp assert_both(%{real_queue: real_queue, mock_queue: mock_queue}, fun, args) do
     real_result = apply(Queue, fun, [real_queue | args])
-    mock_result = apply(Queue.MockQueue, fun, [mock_queue | args])
+    mock_result = apply(Queue.OracleQueue, fun, [mock_queue | args])
 
     # mutators return the queue handle itself; compare only value replies
     real_result = if real_result == real_queue, do: :queue_handle, else: real_result
@@ -20,10 +20,10 @@ defmodule MockParityTest do
     assert real_result == mock_result,
            "#{fun}(#{inspect(args)}): real #{inspect(real_result)} != mock #{inspect(mock_result)}"
 
-    assert Queue.to_list(real_queue) == Queue.MockQueue.to_list(mock_queue),
+    assert Queue.to_list(real_queue) == Queue.OracleQueue.to_list(mock_queue),
            "contents diverged after #{fun}"
 
-    assert Queue.count(real_queue) == Queue.MockQueue.count(mock_queue),
+    assert Queue.count(real_queue) == Queue.OracleQueue.count(mock_queue),
            "count diverged after #{fun}"
 
     real_result

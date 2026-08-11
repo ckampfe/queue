@@ -1,4 +1,4 @@
-defmodule Queue.MockQueue do
+defmodule Queue.OracleQueue do
   @moduledoc """
   A queue server that implements the same interface
   and behavior as the Queue NIF, so we can run property
