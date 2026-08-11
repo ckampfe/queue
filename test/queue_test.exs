@@ -1,5 +1,5 @@
 defmodule QueueTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   doctest Queue
 
   describe "to_list/1" do
@@ -1405,6 +1405,33 @@ defmodule QueueTest do
       Queue.push_back(q, 3)
       assert 3 == Queue.peek_front(q)
       assert 1 == Queue.count(q)
+    end
+
+    test "sees past an empty front slab left by extend_front/2" do
+      # extend_front/2 pushes a fresh slab onto the front when a batch lands
+      # exactly on a slab boundary, so the front slab is empty and the front
+      # position sits one past its end.
+      for n <- [4096, 2 * 4096] do
+        q = Queue.new()
+        Queue.extend_front(q, Enum.to_list(1..n))
+
+        assert n == Queue.count(q)
+        assert n == Queue.peek_front(q)
+        assert 1 == Queue.peek_back(q)
+        assert n == Queue.pop_front(q)
+        assert n - 1 == Queue.peek_front(q)
+      end
+    end
+
+    test "sees past an empty front slab when the queue was not empty" do
+      q = Queue.new()
+      Queue.push_back(q, :seed)
+      Queue.extend_front(q, Enum.to_list(1..4096))
+
+      assert 4097 == Queue.count(q)
+      assert 4096 == Queue.peek_front(q)
+      assert :seed == Queue.peek_back(q)
+      assert Enum.to_list(4096..1//-1) ++ [:seed] == Queue.to_list(q)
     end
 
     test "concurrent peeks all see the same element" do

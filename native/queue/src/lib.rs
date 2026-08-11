@@ -319,13 +319,20 @@ impl QueueImpl {
     }
 
     fn peek_front<'env>(&self, caller_env: Env<'env>) -> Option<Term<'env>> {
-        if let Some(slab) = self.slabs.front()
-            && self.len() != 0
-        {
-            Some(slab.copy_one_out_of(self.front_slab_position, caller_env))
-        } else {
-            None
+        if self.len() == 0 {
+            return None;
         }
+
+        // `front_slab_position` is the first live element. when it is
+        // SLAB_SIZE the front slab has nothing left in it, and the first
+        // live element is the first slot of the slab after it.
+        let (slab, position) = if self.front_slab_position == SLAB_SIZE {
+            (self.slabs.get(1)?, 0)
+        } else {
+            (self.slabs.front()?, self.front_slab_position)
+        };
+
+        Some(slab.copy_one_out_of(position, caller_env))
     }
 
     fn peek_back<'env>(&self, caller_env: Env<'env>) -> Option<Term<'env>> {
